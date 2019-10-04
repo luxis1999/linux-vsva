@@ -289,7 +289,8 @@ struct iommu_ops {
 	void (*sva_unbind)(struct iommu_sva *handle);
 	int (*sva_get_pasid)(struct iommu_sva *handle);
 
-	int (*page_response)(struct device *dev,
+	int (*page_response)(struct iommu_domain *domain,
+			     struct device *dev,
 			     struct iommu_fault_event *evt,
 			     struct iommu_page_response *msg);
 	int (*cache_invalidate)(struct iommu_domain *domain, struct device *dev,
@@ -503,7 +504,9 @@ extern int iommu_unregister_device_fault_handler(struct device *dev);
 
 extern int iommu_report_device_fault(struct device *dev,
 				     struct iommu_fault_event *evt);
-extern int iommu_page_response(struct device *dev, void __user *uinfo);
+extern int iommu_page_response(struct iommu_domain *domain,
+			       struct device *dev,
+			       void __user *uinfo);
 
 extern int iommu_group_id(struct iommu_group *group);
 extern struct iommu_domain *iommu_group_default_domain(struct iommu_group *);
@@ -883,7 +886,9 @@ int iommu_report_device_fault(struct device *dev, struct iommu_fault_event *evt)
 	return -ENODEV;
 }
 
-static inline int iommu_page_response(struct device *dev, void __user *uinfo)
+static inline int iommu_page_response(struct iommu_domain *domain,
+				      struct device *dev,
+				      void __user *uinfo)
 {
 	return -ENODEV;
 }
