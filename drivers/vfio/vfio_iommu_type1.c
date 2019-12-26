@@ -2250,6 +2250,26 @@ out_unlock:
 	return ret;
 }
 
+static int vfio_iommu_info_add_nesting_cap(struct vfio_iommu *iommu,
+					 struct vfio_info_cap *caps)
+{
+	struct vfio_info_cap_header *header;
+	struct vfio_iommu_type1_info_cap_nesting *nesting_cap;
+
+	header = vfio_info_cap_add(caps, sizeof(*nesting_cap),
+				   VFIO_IOMMU_TYPE1_INFO_CAP_NESTING, 1);
+	if (IS_ERR(header))
+		return PTR_ERR(header);
+
+	nesting_cap = container_of(header,
+				struct vfio_iommu_type1_info_cap_nesting,
+				header);
+
+	nesting_cap->nesting_capabilities = VFIO_IOMMU_PASID_REQS;
+
+	return 0;
+}
+
 static long vfio_iommu_type1_ioctl(void *iommu_data,
 				   unsigned int cmd, unsigned long arg)
 {
@@ -2296,6 +2316,10 @@ static long vfio_iommu_type1_ioctl(void *iommu_data,
 		info.iova_pgsizes = vfio_pgsize_bitmap(iommu);
 
 		ret = vfio_iommu_iova_build_caps(iommu, &caps);
+		if (ret)
+			return ret;
+
+		ret = vfio_iommu_info_add_nesting_cap(iommu, &caps);
 		if (ret)
 			return ret;
 
