@@ -2234,11 +2234,66 @@ out_unlock:
 	return ret;
 }
 
+static int vfio_iommu_get_stage1_format(struct vfio_iommu *iommu,
+					 u32 *stage1_format)
+{
+	struct vfio_domain *domain;
+	u32 format = 0, tmp_format = 0;
+	int ret;
+
+	mutex_lock(&iommu->lock);
+	if (list_empty(&iommu->domain_list)) {
+		mutex_unlock(&iommu->lock);
+		return -EINVAL;
+	}
+
+	list_for_each_entry(domain, &iommu->domain_list, next) {
+		if (iommu_domain_get_attr(domain->domain,
+			DOMAIN_ATTR_PASID_FORMAT, &format)) {
+			ret = -EINVAL;
+			format = 0;
+			goto out_unlock;
+		}
+		/*
+		 * format is always non-zero (the first format is
+		 * IOMMU_PASID_FORMAT_INTEL_VTD which is 1). For
+		 * the reason of potential different backed IOMMU
+		 * formats, here we expect to have identical formats
+		 * in the domain list, no mixed formats support.
+		 * return -EINVAL to fail the attempt of setup
+		 * VFIO_TYPE1_NESTING_IOMMU if non-identical formats
+		 * are detected.
+		 */
+		if (tmp_format && tmp_format != format) {
+			ret = -EINVAL;
+			format = 0;
+			goto out_unlock;
+		}
+
+		tmp_format = format;
+	}
+	ret = 0;
+
+out_unlock:
+	if (format)
+		*stage1_format = format;
+	mutex_unlock(&iommu->lock);
+	return ret;
+}
+
 static int vfio_iommu_info_add_nesting_cap(struct vfio_iommu *iommu,
 					 struct vfio_info_cap *caps)
 {
 	struct vfio_info_cap_header *header;
 	struct vfio_iommu_type1_info_cap_nesting *nesting_cap;
+	u32 formats = 0;
+	int ret;
+
+	ret = vfio_iommu_get_stage1_format(iommu, &formats);
+	if (ret) {
+		pr_warn("Failed to get stage-1 format\n");
+		return ret;
+	}
 
 	header = vfio_info_cap_add(caps, sizeof(*nesting_cap),
 				   VFIO_IOMMU_TYPE1_INFO_CAP_NESTING, 1);
@@ -2254,6 +2309,7 @@ static int vfio_iommu_info_add_nesting_cap(struct vfio_iommu *iommu,
 		/* nesting iommu type supports PASID requests (alloc/free) */
 		nesting_cap->nesting_capabilities |= VFIO_IOMMU_PASID_REQS;
 	}
+	nesting_cap->stage1_formats = formats;
 
 	return 0;
 }

@@ -763,6 +763,7 @@ struct vfio_iommu_type1_info_cap_nesting {
 	struct	vfio_info_cap_header header;
 #define VFIO_IOMMU_PASID_REQS	(1 << 0)
 	__u32	nesting_capabilities;
+	__u32	stage1_formats;
 };
 
 #define VFIO_IOMMU_GET_INFO _IO(VFIO_TYPE, VFIO_BASE + 12)
