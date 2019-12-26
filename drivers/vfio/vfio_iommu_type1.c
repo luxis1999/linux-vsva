@@ -70,6 +70,7 @@ struct vfio_iommu {
 	unsigned int		dma_avail;
 	bool			v2;
 	bool			nesting;
+	struct vfio_mm		*vmm;
 };
 
 struct vfio_domain {
@@ -2039,6 +2040,7 @@ detach_group_done:
 static void *vfio_iommu_type1_open(unsigned long arg)
 {
 	struct vfio_iommu *iommu;
+	struct vfio_mm *vmm = NULL;
 
 	iommu = kzalloc(sizeof(*iommu), GFP_KERNEL);
 	if (!iommu)
@@ -2064,6 +2066,10 @@ static void *vfio_iommu_type1_open(unsigned long arg)
 	iommu->dma_avail = dma_entry_limit;
 	mutex_init(&iommu->lock);
 	BLOCKING_INIT_NOTIFIER_HEAD(&iommu->notifier);
+	vmm = vfio_mm_get_from_task(current);
+	if (!vmm)
+		pr_err("Failed to get vfio_mm track\n");
+	iommu->vmm = vmm;
 
 	return iommu;
 }
@@ -2105,6 +2111,8 @@ static void vfio_iommu_type1_release(void *iommu_data)
 	}
 
 	vfio_iommu_iova_free(&iommu->iova_list);
+	if (iommu->vmm)
+		vfio_mm_put(iommu->vmm);
 
 	kfree(iommu);
 }
@@ -2188,6 +2196,55 @@ static int vfio_iommu_iova_build_caps(struct vfio_iommu *iommu,
 	ret = vfio_iommu_iova_add_cap(caps, cap_iovas, size);
 
 	kfree(cap_iovas);
+out_unlock:
+	mutex_unlock(&iommu->lock);
+	return ret;
+}
+
+static bool vfio_iommu_type1_pasid_req_valid(u32 flags)
+{
+	return !((flags & ~VFIO_PASID_REQUEST_MASK) ||
+		 (flags & VFIO_IOMMU_PASID_ALLOC &&
+		  flags & VFIO_IOMMU_PASID_FREE));
+}
+
+static int vfio_iommu_type1_pasid_alloc(struct vfio_iommu *iommu,
+					 int min,
+					 int max)
+{
+	struct vfio_mm *vmm = iommu->vmm;
+	int ret = 0;
+
+	mutex_lock(&iommu->lock);
+	if (!IS_IOMMU_CAP_DOMAIN_IN_CONTAINER(iommu)) {
+		ret = -EFAULT;
+		goto out_unlock;
+	}
+	if (vmm)
+		ret = vfio_mm_pasid_alloc(vmm, min, max);
+	else
+		ret = -EINVAL;
+out_unlock:
+	mutex_unlock(&iommu->lock);
+	return ret;
+}
+
+static int vfio_iommu_type1_pasid_free(struct vfio_iommu *iommu,
+				       unsigned int pasid)
+{
+	struct vfio_mm *vmm = iommu->vmm;
+	int ret = 0;
+
+	mutex_lock(&iommu->lock);
+	if (!IS_IOMMU_CAP_DOMAIN_IN_CONTAINER(iommu)) {
+		ret = -EFAULT;
+		goto out_unlock;
+	}
+
+	if (vmm)
+		ret = vfio_mm_pasid_free(vmm, pasid);
+	else
+		ret = -EINVAL;
 out_unlock:
 	mutex_unlock(&iommu->lock);
 	return ret;
@@ -2297,6 +2354,49 @@ static long vfio_iommu_type1_ioctl(void *iommu_data,
 
 		return copy_to_user((void __user *)arg, &unmap, minsz) ?
 			-EFAULT : 0;
+
+	} else if (cmd == VFIO_IOMMU_PASID_REQUEST) {
+		struct vfio_iommu_type1_pasid_request req;
+		u32 pasid;
+		int ret = 0, result;
+		unsigned long offset;
+
+		minsz = offsetofend(struct vfio_iommu_type1_pasid_request,
+				    flags);
+
+		if (copy_from_user(&req, (void __user *)arg, minsz))
+			return -EFAULT;
+
+		if (req.argsz < minsz ||
+		    !vfio_iommu_type1_pasid_req_valid(req.flags))
+			return -EINVAL;
+
+		switch (req.flags & VFIO_PASID_REQUEST_MASK) {
+		case VFIO_IOMMU_PASID_ALLOC:
+			if (copy_from_user((void *)&req + minsz,
+				(void __user *)arg + minsz,
+				sizeof(req) - minsz))
+				return -EFAULT;
+
+			result = vfio_iommu_type1_pasid_alloc(iommu,
+				    req.alloc_pasid.min, req.alloc_pasid.max);
+			if (result > 0) {
+				offset = offsetof(
+					struct vfio_iommu_type1_pasid_request,
+					alloc_pasid.result);
+				ret = copy_to_user(
+					      (void __user *) (arg + offset),
+					      &result, sizeof(result));
+			}
+			return ret;
+		case VFIO_IOMMU_PASID_FREE:
+			if (copy_from_user(&pasid,
+				(void __user *)arg + minsz, sizeof(pasid)))
+				return -EFAULT;
+			return vfio_iommu_type1_pasid_free(iommu, pasid);
+		default:
+			return -EINVAL;
+		}
 	}
 
 	return -ENOTTY;
