@@ -5763,8 +5763,9 @@ static int intel_iommu_sva_invalidate(struct iommu_domain *domain,
 	int ret = 0;
 	u64 size;
 
+	/* Support current or older UAPI versions */
 	if (!inv_info || !dmar_domain ||
-		inv_info->version != IOMMU_CACHE_INVALIDATE_INFO_VERSION_1)
+		inv_info->version > IOMMU_UAPI_VERSION)
 		return -EINVAL;
 
 	if (!dev || !dev_is_pci(dev))
