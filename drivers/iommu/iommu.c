@@ -1696,6 +1696,28 @@ int iommu_sva_unbind_gpasid(struct iommu_domain *domain, struct device *dev,
 }
 EXPORT_SYMBOL_GPL(iommu_sva_unbind_gpasid);
 
+
+/**
+ * Maintain a UAPI version to user data structure size lookup for each
+ * API function types we support. e.g. bind guest pasid, cache invalidation.
+ * As data structures being extended with new members, the offsetofend()
+ * will identify the new sizes.
+ */
+const static int iommu_uapi_data_size[NR_IOMMU_UAPI_TYPE][IOMMU_UAPI_VERSION] = {
+	/* IOMMU_UAPI_BIND_GPASID */
+	{offsetofend(struct iommu_gpasid_bind_data, vtd)},
+	/* IOMMU_UAPI_CACHE_INVAL */
+	{offsetofend(struct iommu_cache_invalidate_info, addr_info)},
+	/* IOMMU_UAPI_PAGE_RESP */
+	{offsetofend(struct iommu_page_response, code)},
+};
+
+int iommu_uapi_get_data_size(int type, int version)
+{
+	return iommu_uapi_data_size[type][version - 1];
+}
+EXPORT_SYMBOL_GPL(iommu_uapi_get_data_size);
+
 static void __iommu_detach_device(struct iommu_domain *domain,
 				  struct device *dev)
 {
