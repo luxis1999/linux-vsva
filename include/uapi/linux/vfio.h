@@ -47,6 +47,15 @@
 #define VFIO_NOIOMMU_IOMMU		8
 
 /*
+ * Hardware IOMMUs with two-stage translation capability give userspace
+ * the ownership of stage-1 translation structures (e.g. page tables).
+ * VFIO exposes the two-stage IOMMU programming capability to userspace
+ * based on the IOMMU UAPIs. Therefore user of VFIO_TYPE1_NESTING should
+ * check the IOMMU UAPI version compatibility.
+ */
+#define VFIO_NESTING_IOMMU_UAPI		9
+
+/*
  * The IOCTL interface is designed for extensibility by embedding the
  * structure length (argsz) and flags into structures passed between
  * kernel and userspace.  We therefore use the _IO() macro for these

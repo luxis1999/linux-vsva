@@ -2274,6 +2274,8 @@ static long vfio_iommu_type1_ioctl(void *iommu_data,
 			if (!iommu)
 				return 0;
 			return vfio_domains_have_iommu_cache(iommu);
+		case VFIO_NESTING_IOMMU_UAPI:
+			return iommu_get_uapi_version();
 		default:
 			return 0;
 		}
