@@ -2135,7 +2135,7 @@ EXPORT_SYMBOL(vfio_unregister_notifier);
  * VFIO_MM objects - create, release, get, put, search
  * Caller of the function should have held vfio.vfio_mm_lock.
  */
-static struct vfio_mm *vfio_create_mm(struct mm_struct *mm)
+static struct vfio_mm *vfio_create_mm(struct mm_struct *mm, int *quota)
 {
 	struct vfio_mm *vmm;
 
@@ -2145,7 +2145,7 @@ static struct vfio_mm *vfio_create_mm(struct mm_struct *mm)
 
 	kref_init(&vmm->kref);
 	vmm->mm = mm;
-	vmm->pasid_quota = VFIO_DEFAULT_PASID_QUOTA;
+	vmm->pasid_quota = quota;
 	vmm->pasid_count = 0;
 	mutex_init(&vmm->pasid_lock);
 
@@ -2181,7 +2181,8 @@ static void vfio_mm_get(struct vfio_mm *vmm)
 	kref_get(&vmm->kref);
 }
 
-struct vfio_mm *vfio_mm_get_from_task(struct task_struct *task)
+struct vfio_mm *vfio_mm_get_from_task(struct task_struct *task,
+				      int *quota)
 {
 	struct mm_struct *mm = get_task_mm(task);
 	struct vfio_mm *vmm;
@@ -2194,7 +2195,7 @@ struct vfio_mm *vfio_mm_get_from_task(struct task_struct *task)
 		}
 	}
 
-	vmm = vfio_create_mm(mm);
+	vmm = vfio_create_mm(mm, quota);
 	if (IS_ERR(vmm))
 		vmm = NULL;
 out:
@@ -2210,7 +2211,7 @@ int vfio_mm_pasid_alloc(struct vfio_mm *vmm, int min, int max)
 	int ret = -ENOSPC;
 
 	mutex_lock(&vmm->pasid_lock);
-	if (vmm->pasid_count >= vmm->pasid_quota) {
+	if (vmm->pasid_count >= *vmm->pasid_quota) {
 		ret = -ENOSPC;
 		goto out_unlock;
 	}

@@ -60,6 +60,11 @@ module_param_named(dma_entry_limit, dma_entry_limit, uint, 0644);
 MODULE_PARM_DESC(dma_entry_limit,
 		 "Maximum number of user DMA mappings per container (65535).");
 
+static unsigned int pasid_quota = VFIO_DEFAULT_PASID_QUOTA;
+module_param_named(pasid_quota, pasid_quota, uint, 0644);
+MODULE_PARM_DESC(pasid_quota,
+		 "Quota of user owned PASIDs per vfio-based application (1000).");
+
 struct vfio_iommu {
 	struct list_head	domain_list;
 	struct list_head	iova_list;
@@ -2066,7 +2071,7 @@ static void *vfio_iommu_type1_open(unsigned long arg)
 	iommu->dma_avail = dma_entry_limit;
 	mutex_init(&iommu->lock);
 	BLOCKING_INIT_NOTIFIER_HEAD(&iommu->notifier);
-	vmm = vfio_mm_get_from_task(current);
+	vmm = vfio_mm_get_from_task(current, &pasid_quota);
 	if (!vmm)
 		pr_err("Failed to get vfio_mm track\n");
 	iommu->vmm = vmm;

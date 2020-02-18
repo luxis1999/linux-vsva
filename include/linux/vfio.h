@@ -93,13 +93,14 @@ extern void vfio_unregister_iommu_driver(
 struct vfio_mm {
 	struct kref			kref;
 	struct mutex			pasid_lock;
-	int				pasid_quota;
+	int				*pasid_quota;
 	int				pasid_count;
 	struct mm_struct		*mm;
 	struct list_head		vfio_next;
 };
 
-extern struct vfio_mm *vfio_mm_get_from_task(struct task_struct *task);
+extern struct vfio_mm *vfio_mm_get_from_task(struct task_struct *task,
+						int *quota);
 extern void vfio_mm_put(struct vfio_mm *vmm);
 extern int vfio_mm_pasid_alloc(struct vfio_mm *vmm, int min, int max);
 extern int vfio_mm_pasid_free(struct vfio_mm *vmm, ioasid_t pasid);
