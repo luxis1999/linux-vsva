@@ -6372,8 +6372,13 @@ intel_iommu_dev_has_feat(struct device *dev, enum iommu_dev_features feat)
 static int
 intel_iommu_dev_enable_feat(struct device *dev, enum iommu_dev_features feat)
 {
+	struct intel_iommu *intel_iommu = dev_to_intel_iommu(dev);
+
 	if (feat == IOMMU_DEV_FEAT_AUX)
 		return intel_iommu_enable_auxd(dev);
+
+	if (feat == IOMMU_DEV_FEAT_SVA)
+		return intel_iommu->flags & VTD_FLAG_SVM_CAPABLE;
 
 	return -ENODEV;
 }
