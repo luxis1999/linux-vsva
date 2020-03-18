@@ -17,6 +17,23 @@ struct ioasid_data {
 	struct rcu_head rcu;
 };
 
+static ioasid_t ioasid_capacity;
+static ioasid_t ioasid_capacity_avail;
+
+/* System capacity can only be set once */
+static bool ioasid_capacity_set = false;
+void ioasid_install_capacity(ioasid_t total)
+{
+	if (ioasid_capacity_set) {
+		pr_warn("IOASID capacity already set at %d\n", ioasid_capacity);
+		return;
+	}
+
+	ioasid_capacity = ioasid_capacity_avail = total;
+	ioasid_capacity_set = true;
+}
+EXPORT_SYMBOL_GPL(ioasid_install_capacity);
+
 /*
  * struct ioasid_allocator_data - Internal data structure to hold information
  * about an allocator. There are two types of allocators:
