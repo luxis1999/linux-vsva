@@ -328,14 +328,15 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain,
 			svm->gpasid = data->gpasid;
 			svm->flags |= SVM_FLAG_GUEST_PASID;
 		}
-		ioasid_set_data(data->hpasid, svm);
+
+		ioasid_attach_data(data->hpasid, svm);
 		INIT_LIST_HEAD_RCU(&svm->devs);
 		mmput(svm->mm);
 	}
 	sdev = kzalloc(sizeof(*sdev), GFP_KERNEL);
 	if (!sdev) {
 		if (list_empty(&svm->devs)) {
-			ioasid_set_data(data->hpasid, NULL);
+			ioasid_attach_data(data->hpasid, NULL);
 			kfree(svm);
 		}
 		ret = -ENOMEM;
@@ -355,7 +356,7 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain,
 		 * was allocated in this function.
 		 */
 		if (list_empty(&svm->devs)) {
-			ioasid_set_data(data->hpasid, NULL);
+			ioasid_attach_data(data->hpasid, NULL);
 			kfree(svm);
 		}
 		goto out;
@@ -384,7 +385,7 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain,
 		 */
 		kfree(sdev);
 		if (list_empty(&svm->devs)) {
-			ioasid_set_data(data->hpasid, NULL);
+			ioasid_attach_data(data->hpasid, NULL);
 			kfree(svm);
 		}
 		goto out;
@@ -447,7 +448,7 @@ int intel_svm_unbind_gpasid(struct device *dev, int pasid)
 				 * that PASID allocated by one guest cannot be
 				 * used by another.
 				 */
-				ioasid_set_data(pasid, NULL);
+				ioasid_attach_data(pasid, NULL);
 				kfree(svm);
 			}
 		}
