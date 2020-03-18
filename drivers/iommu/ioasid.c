@@ -292,14 +292,14 @@ exit_unlock:
 EXPORT_SYMBOL_GPL(ioasid_unregister_allocator);
 
 /**
- * ioasid_set_data - Set private data for an allocated ioasid
+ * ioasid_attach_data - Set private data for an allocated ioasid
  * @ioasid: the ID to set data
  * @data:   the private data
  *
  * For IOASID that is already allocated, private data can be set
  * via this API. Future lookup can be done via ioasid_find.
  */
-int ioasid_set_data(ioasid_t ioasid, void *data)
+int ioasid_attach_data(ioasid_t ioasid, void *data)
 {
 	struct ioasid_data *ioasid_data;
 	int ret = 0;
@@ -321,7 +321,7 @@ int ioasid_set_data(ioasid_t ioasid, void *data)
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(ioasid_set_data);
+EXPORT_SYMBOL_GPL(ioasid_attach_data);
 
 /**
  * ioasid_alloc - Allocate an IOASID
@@ -554,29 +554,6 @@ unlock:
 	return priv;
 }
 EXPORT_SYMBOL_GPL(ioasid_find);
-
-/**
- * ioasid_find_sid - Retrieve IOASID set ID from an ioasid
- *                   Caller must hold a reference to the set.
- *
- * @ioasid: IOASID associated with the set
- *
- * Return IOASID set ID or error
- */
-int ioasid_find_sid(ioasid_t ioasid)
-{
-	struct ioasid_data *ioasid_data;
-	int ret = 0;
-
-	spin_lock(&ioasid_allocator_lock);
-	ioasid_data = xa_load(&active_allocator->xa, ioasid);
-	ret = (ioasid_data) ? ioasid_data->sdata->sid : -ENOENT;
-
-	spin_unlock(&ioasid_allocator_lock);
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(ioasid_find_sid);
 
 MODULE_AUTHOR("Jean-Philippe Brucker <jean-philippe.brucker@arm.com>");
 MODULE_AUTHOR("Jacob Pan <jacob.jun.pan@linux.intel.com>");
