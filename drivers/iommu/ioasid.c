@@ -10,6 +10,25 @@
 #include <linux/spinlock.h>
 #include <linux/xarray.h>
 
+static DEFINE_XARRAY_ALLOC(ioasid_sets);
+/**
+ * struct ioasid_set_data - Meta data about ioasid_set
+ *
+ * @token:	Unique to identify an IOASID set
+ * @xa:		XArray to store subset ID and IOASID mapping
+ * @size:	Max number of IOASIDs can be allocated within the set
+ * @nr_ioasids	Number of IOASIDs allocated in the set
+ * @sid		ID of the set
+ */
+struct ioasid_set_data {
+	struct ioasid_set *token;
+	struct xarray xa;
+	int size;
+	int nr_ioasids;
+	int sid;
+	struct rcu_head rcu;
+};
+
 struct ioasid_data {
 	ioasid_t id;
 	struct ioasid_set *set;
@@ -388,6 +407,111 @@ exit_unlock:
 	spin_unlock(&ioasid_allocator_lock);
 }
 EXPORT_SYMBOL_GPL(ioasid_free);
+
+/**
+ * ioasid_alloc_set - Allocate a set of IOASIDs
+ * @token:	Unique token of the IOASID set
+ * @quota:	Quota allowed in this set
+ * @sid:	IOASID set ID to be assigned
+ *
+ * Return 0 upon success. Token will be stored internally for lookup,
+ * IOASID allocation within the set and other per set operations will use
+ * the @sid assigned.
+ *
+ */
+int ioasid_alloc_set(struct ioasid_set *token, ioasid_t quota, int *sid)
+{
+	struct ioasid_set_data *sdata;
+	ioasid_t id;
+	int ret = 0;
+
+	if (quota > ioasid_capacity_avail) {
+		pr_warn("Out of IOASID capacity! ask %d, avail %d\n",
+			quota, ioasid_capacity_avail);
+		return -ENOSPC;
+	}
+
+	sdata = kzalloc(sizeof(*sdata), GFP_KERNEL);
+	if (!sdata)
+		return -ENOMEM;
+
+	spin_lock(&ioasid_allocator_lock);
+
+	ret = xa_alloc(&ioasid_sets, &id, sdata,
+		       XA_LIMIT(0, ioasid_capacity_avail - quota),
+		       GFP_KERNEL);
+	if (ret) {
+		kfree(sdata);
+		goto error;
+	}
+
+	sdata->token = token;
+	sdata->size = quota;
+	sdata->sid = id;
+
+	/*
+	 * Set Xarray is used to store IDs within the set, get ready for
+	 * sub-set ID and system-wide IOASID allocation results.
+	 */
+	xa_init_flags(&sdata->xa, XA_FLAGS_ALLOC);
+
+	ioasid_capacity_avail -= quota;
+	*sid = id;
+
+error:
+	spin_unlock(&ioasid_allocator_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ioasid_alloc_set);
+
+/**
+ * ioasid_free_set - Free all IOASIDs within the set
+ *
+ * @sid:		The IOASID set ID to be freed
+ * @destroy_set:	Whether to keep the set for further allocation.
+ *			If true, the set will be destroyed.
+ *
+ * All IOASIDs allocated within the set will be freed upon return.
+ */
+void ioasid_free_set(int sid, bool destroy_set)
+{
+	struct ioasid_set_data *sdata;
+	struct ioasid_data *entry;
+	unsigned long index;
+
+	spin_lock(&ioasid_allocator_lock);
+	sdata = xa_load(&ioasid_sets, sid);
+	if (!sdata) {
+		pr_err("No IOASID set found to free %d\n", sid);
+		goto done_unlock;
+	}
+
+	if (xa_empty(&sdata->xa)) {
+		pr_warn("No IOASIDs in the set %d\n", sdata->sid);
+		goto done_destroy;
+	}
+
+	/* Just a place holder for now */
+	xa_for_each(&sdata->xa, index, entry) {
+		/* Free from per sub-set pool */
+		xa_erase(&sdata->xa, index);
+	}
+
+done_destroy:
+	if (destroy_set) {
+		xa_erase(&ioasid_sets, sid);
+
+		/* Return the quota back to system pool */
+		ioasid_capacity_avail += sdata->size;
+		kfree_rcu(sdata, rcu);
+	}
+
+done_unlock:
+	spin_unlock(&ioasid_allocator_lock);
+}
+EXPORT_SYMBOL_GPL(ioasid_free_set);
+
 
 /**
  * ioasid_find - Find IOASID data
