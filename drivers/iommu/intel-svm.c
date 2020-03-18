@@ -234,7 +234,7 @@ static LIST_HEAD(global_svm_list);
 static inline void intel_svm_free_if_empty(struct intel_svm *svm, u64 pasid)
 {
 	if (list_empty(&svm->devs)) {
-		ioasid_set_data(pasid, NULL);
+		ioasid_attach_data(pasid, NULL);
 		kfree(svm);
 	}
 }
@@ -322,7 +322,8 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 			svm->gpasid = data->gpasid;
 			svm->flags |= SVM_FLAG_GUEST_PASID;
 		}
-		ioasid_set_data(data->hpasid, svm);
+
+		ioasid_attach_data(data->hpasid, svm);
 		INIT_LIST_HEAD_RCU(&svm->devs);
 		mmput(svm->mm);
 	}
@@ -431,7 +432,7 @@ int intel_svm_unbind_gpasid(struct device *dev, int pasid)
 				 * the unbind, IOMMU driver will get notified
 				 * and perform cleanup.
 				 */
-				ioasid_set_data(pasid, NULL);
+				ioasid_attach_data(pasid, NULL);
 				kfree(svm);
 			}
 		}
