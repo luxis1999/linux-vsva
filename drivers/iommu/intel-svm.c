@@ -23,6 +23,11 @@
 #include "intel-pasid.h"
 
 static irqreturn_t prq_event_thread(int irq, void *d);
+/*
+ * Flag to track if we have done registration with IOASID core for
+ * allocation and notification.
+ */
+static bool ioasid_ready;
 
 #define PRQ_ORDER 0
 
@@ -112,6 +117,10 @@ void intel_svm_check(struct intel_iommu *iommu)
 	}
 
 	iommu->flags |= VTD_FLAG_SVM_CAPABLE;
+	if (!ioasid_ready) {
+		ioasid_install_capacity(intel_pasid_max_id);
+		ioasid_ready = true;
+	}
 }
 
 static void intel_flush_svm_range_dev (struct intel_svm *svm, struct intel_svm_dev *sdev,
