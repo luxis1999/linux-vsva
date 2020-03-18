@@ -60,6 +60,11 @@ module_param_named(dma_entry_limit, dma_entry_limit, uint, 0644);
 MODULE_PARM_DESC(dma_entry_limit,
 		 "Maximum number of user DMA mappings per container (65535).");
 
+static int pasid_quota = VFIO_DEFAULT_PASID_QUOTA;
+module_param_named(pasid_quota, pasid_quota, uint, 0644);
+MODULE_PARM_DESC(pasid_quota,
+		 "Quota of user owned PASIDs per vfio-based application (1000).");
+
 struct vfio_iommu {
 	struct list_head	domain_list;
 	struct list_head	iova_list;
@@ -2200,7 +2205,7 @@ static int vfio_iommu_type1_pasid_alloc(struct vfio_iommu *iommu,
 		goto out_unlock;
 	}
 	if (vmm)
-		ret = vfio_mm_pasid_alloc(vmm, min, max);
+		ret = vfio_mm_pasid_alloc(vmm, pasid_quota, min, max);
 	else
 		ret = -EINVAL;
 out_unlock:

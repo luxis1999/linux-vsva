@@ -2217,12 +2217,18 @@ out:
 }
 EXPORT_SYMBOL_GPL(vfio_mm_get_from_task);
 
-int vfio_mm_pasid_alloc(struct vfio_mm *vmm, int min, int max)
+int vfio_mm_pasid_alloc(struct vfio_mm *vmm, int quota, int min, int max)
 {
 	ioasid_t pasid;
 	int ret = -ENOSPC;
 
 	mutex_lock(&vmm->pasid_lock);
+
+	/* update quota as it is tunable by admin */
+	if (vmm->pasid_quota != quota) {
+		vmm->pasid_quota = quota;
+		ioasid_adjust_set(vmm->ioasid_sid, quota);
+	}
 
 	pasid = ioasid_alloc(vmm->ioasid_sid, min, max, NULL);
 	if (pasid == INVALID_IOASID) {

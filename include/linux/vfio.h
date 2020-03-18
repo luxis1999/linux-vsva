@@ -106,7 +106,8 @@ struct vfio_mm {
 
 extern struct vfio_mm *vfio_mm_get_from_task(struct task_struct *task);
 extern void vfio_mm_put(struct vfio_mm *vmm);
-extern int vfio_mm_pasid_alloc(struct vfio_mm *vmm, int min, int max);
+extern int vfio_mm_pasid_alloc(struct vfio_mm *vmm,
+				int quota, int min, int max);
 extern int vfio_mm_pasid_free(struct vfio_mm *vmm, ioasid_t pasid);
 
 /*
