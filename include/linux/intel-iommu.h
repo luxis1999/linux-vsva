@@ -739,6 +739,8 @@ struct iommu_sva *intel_svm_bind(struct device *dev, struct mm_struct *mm,
 				 void *drvdata);
 void intel_svm_unbind(struct iommu_sva *handle);
 int intel_svm_get_pasid(struct iommu_sva *handle);
+void intel_svm_add_pasid_notifier(void);
+
 struct svm_dev_ops;
 
 struct intel_svm_dev {
