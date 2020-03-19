@@ -11,6 +11,22 @@
 #include <linux/xarray.h>
 
 static DEFINE_XARRAY_ALLOC(ioasid_sets);
+/*
+ * An IOASID could have multiple consumers. When a status change occurs,
+ * this notifier chain is used to keep them in sync. Each consumer of the
+ * IOASID service must register notifier block early to ensure no events
+ * are missed.
+ *
+ * This is a publisher-subscriber pattern where publisher can change the
+ * state of each IOASID, e.g. alloc/free, bind IOASID to a device and mm.
+ * On the other hand, subscribers gets notified for the state change and
+ * keep local states in sync.
+ *
+ * Currently, the notifier is global. A further optimization could be per
+ * IOASID set notifier chain.
+ */
+static BLOCKING_NOTIFIER_HEAD(ioasid_chain);
+
 /**
  * struct ioasid_set_data - Meta data about ioasid_set
  *
@@ -403,6 +419,7 @@ static void ioasid_free_locked(ioasid_t ioasid)
 {
 	struct ioasid_data *ioasid_data;
 	struct ioasid_set_data *sdata;
+	struct ioasid_nb_args args;
 
 	ioasid_data = xa_load(&active_allocator->xa, ioasid);
 	if (!ioasid_data) {
@@ -410,6 +427,13 @@ static void ioasid_free_locked(ioasid_t ioasid)
 		return;
 	}
 
+	args.id = ioasid;
+	args.sid = ioasid_data->sdata->sid;
+	args.pdata = ioasid_data->private;
+	args.set_token = ioasid_data->sdata->token;
+
+	/* Notify all users that this IOASID is being freed */
+	blocking_notifier_call_chain(&ioasid_chain, IOASID_FREE, &args);
 	active_allocator->ops->free(ioasid, active_allocator->ops->pdata);
 	/* Custom allocator needs additional steps to free the xa element */
 	if (active_allocator->flags & IOASID_ALLOCATOR_CUSTOM) {
@@ -618,6 +642,43 @@ int ioasid_find_sid(ioasid_t ioasid)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(ioasid_find_sid);
+
+int ioasid_add_notifier(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_register(&ioasid_chain, nb);
+}
+EXPORT_SYMBOL_GPL(ioasid_add_notifier);
+
+void ioasid_remove_notifier(struct notifier_block *nb)
+{
+	blocking_notifier_chain_unregister(&ioasid_chain, nb);
+}
+EXPORT_SYMBOL_GPL(ioasid_remove_notifier);
+
+int ioasid_notify(ioasid_t ioasid, enum ioasid_notify_val cmd)
+{
+	struct ioasid_data *ioasid_data;
+	struct ioasid_nb_args args;
+	int ret = 0;
+
+	mutex_lock(&ioasid_allocator_lock);
+	ioasid_data = xa_load(&active_allocator->xa, ioasid);
+	if (!ioasid_data) {
+		pr_err("Trying to free unknown IOASID %u\n", ioasid);
+		mutex_unlock(&ioasid_allocator_lock);
+		return -EINVAL;
+	}
+
+	args.id = ioasid;
+	args.sid = ioasid_data->sdata->sid;
+	args.pdata = ioasid_data->private;
+
+	ret = blocking_notifier_call_chain(&ioasid_chain, cmd, &args);
+	mutex_unlock(&ioasid_allocator_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ioasid_notify);
 
 MODULE_AUTHOR("Jean-Philippe Brucker <jean-philippe.brucker@arm.com>");
 MODULE_AUTHOR("Jacob Pan <jacob.jun.pan@linux.intel.com>");

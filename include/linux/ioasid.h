@@ -4,6 +4,7 @@
 
 #include <linux/types.h>
 #include <linux/errno.h>
+#include <linux/notifier.h>
 
 #define INVALID_IOASID ((ioasid_t)-1)
 #define INVALID_IOASID_SET (-1)
@@ -30,6 +31,27 @@ struct ioasid_allocator_ops {
 	void *pdata;
 };
 
+/* Notification data when IOASID status changed */
+enum ioasid_notify_val {
+	IOASID_ALLOC = 1,
+	IOASID_FREE,
+	IOASID_BIND,
+	IOASID_UNBIND,
+};
+
+/**
+ * struct ioasid_nb_args - Argument provided by IOASID core when notifier
+ * is called.
+ * @id:		the IOASID being notified
+ * @sid:	the IOASID set @id belongs to
+ * @pdata:	the private data attached to the IOASID
+ */
+struct ioasid_nb_args {
+	ioasid_t id;
+	int sid;
+	struct ioasid_set *set_token;
+	void *pdata;
+};
 /* Shared IOASID set for reserved for host system use */
 extern int system_ioasid_sid;
 
@@ -43,10 +65,13 @@ void *ioasid_find(int sid, ioasid_t ioasid, bool (*getter)(void *));
 int ioasid_register_allocator(struct ioasid_allocator_ops *allocator);
 void ioasid_unregister_allocator(struct ioasid_allocator_ops *allocator);
 int ioasid_attach_data(ioasid_t ioasid, void *data);
+int ioasid_add_notifier(struct notifier_block *nb);
+void ioasid_remove_notifier(struct notifier_block *nb);
 void ioasid_install_capacity(ioasid_t total);
 int ioasid_alloc_set(struct ioasid_set *token, ioasid_t quota, int *sid);
 void ioasid_free_set(int sid, bool destroy_set);
 int ioasid_find_sid(ioasid_t ioasid);
+int ioasid_notify(ioasid_t id, enum ioasid_notify_val cmd);
 
 #else /* !CONFIG_IOASID */
 static inline ioasid_t ioasid_alloc(int sid, ioasid_t min,
@@ -71,6 +96,20 @@ static inline void ioasid_free_set(int sid, bool destroy_set)
 static inline void *ioasid_find(int sid, ioasid_t ioasid, bool (*getter)(void *))
 {
 	return NULL;
+}
+
+static inline int ioasid_add_notifier(struct notifier_block *nb)
+{
+	return -ENOTSUPP;
+}
+
+static inline void ioasid_remove_notifier(struct notifier_block *nb)
+{
+}
+
+int ioasid_notify(ioasid_t ioasid, enum ioasid_notify_val cmd)
+{
+	return -ENOTSUPP;
 }
 
 static inline int ioasid_register_allocator(struct ioasid_allocator_ops *allocator)
