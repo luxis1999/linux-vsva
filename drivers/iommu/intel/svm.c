@@ -24,6 +24,7 @@
 
 static irqreturn_t prq_event_thread(int irq, void *d);
 static void intel_svm_drain_prq(struct device *dev, int pasid);
+static DEFINE_MUTEX(pasid_mutex);
 
 #define PRQ_ORDER 0
 
@@ -93,6 +94,65 @@ int intel_svm_finish_prq(struct intel_iommu *iommu)
 static inline bool intel_svm_capable(struct intel_iommu *iommu)
 {
 	return iommu->flags & VTD_FLAG_SVM_CAPABLE;
+}
+
+#define pasid_lock_held() lock_is_held(&pasid_mutex.dep_map)
+
+static int pasid_status_change(struct notifier_block *nb,
+				unsigned long code, void *data)
+{
+	struct ioasid_nb_args *args = (struct ioasid_nb_args *)data;
+	struct intel_svm_dev *sdev;
+	struct intel_svm *svm;
+	int ret = NOTIFY_DONE;
+
+	if (code == IOASID_FREE) {
+		/*
+		 * Unbind all devices associated with this PASID which is
+		 * being freed by other users such as VFIO.
+		 */
+		mutex_lock(&pasid_mutex);
+		svm = ioasid_find(INVALID_IOASID_SET, args->id, NULL);
+		if (!svm || !svm->iommu)
+			goto done_unlock;
+
+		if (IS_ERR(svm)) {
+			ret = NOTIFY_BAD;
+			goto done_unlock;
+		}
+
+		list_for_each_entry_rcu(sdev, &svm->devs, list, pasid_lock_held()) {
+			/* Does not poison forward pointer */
+			list_del_rcu(&sdev->list);
+			intel_pasid_tear_down_entry(svm->iommu, sdev->dev,
+						    svm->pasid);
+			kfree_rcu(sdev, rcu);
+
+			/*
+			 * Free before unbind only happens with guest usaged
+			 * host PASIDs. IOASID free will detach private data
+			 * and free the IOASID entry.
+			 */
+			if (list_empty(&svm->devs))
+				kfree(svm);
+		}
+		mutex_unlock(&pasid_mutex);
+
+		return NOTIFY_OK;
+	}
+
+done_unlock:
+	mutex_unlock(&pasid_mutex);
+	return ret;
+}
+
+static struct notifier_block pasid_nb = {
+		.notifier_call = pasid_status_change,
+};
+
+void intel_svm_add_pasid_notifier(void)
+{
+	ioasid_add_notifier(&pasid_nb);
 }
 
 void intel_svm_check(struct intel_iommu *iommu)
@@ -221,7 +281,6 @@ static const struct mmu_notifier_ops intel_mmuops = {
 	.invalidate_range = intel_invalidate_range,
 };
 
-static DEFINE_MUTEX(pasid_mutex);
 static LIST_HEAD(global_svm_list);
 
 #define for_each_svm_dev(sdev, svm, d)			\
@@ -310,6 +369,7 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 			svm->gpasid = data->gpasid;
 			svm->flags |= SVM_FLAG_GUEST_PASID;
 		}
+		svm->iommu = iommu;
 
 		ioasid_attach_data(data->hpasid, svm);
 		INIT_LIST_HEAD_RCU(&svm->devs);
@@ -359,6 +419,11 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 
 	svm->flags |= SVM_FLAG_GUEST_MODE;
 
+	/*
+	 * Notify KVM new host-guest PASID bind is ready. KVM will set up
+	 * PASID translation table to support guest ENQCMD.
+	 */
+	ioasid_notify(data->hpasid, IOASID_BIND);
 	init_rcu_head(&sdev->rcu);
 	list_add_rcu(&sdev->list, &svm->devs);
  out:
@@ -415,6 +480,7 @@ int intel_svm_unbind_gpasid(struct device *dev, int pasid)
 				 * and perform cleanup.
 				 */
 				ioasid_attach_data(pasid, NULL);
+				ioasid_notify(pasid, IOASID_UNBIND);
 				kfree(svm);
 			}
 		}
