@@ -125,7 +125,7 @@ static int pasid_status_change(struct notifier_block *nb,
 			/* Does not poison forward pointer */
 			list_del_rcu(&sdev->list);
 			intel_pasid_tear_down_entry(svm->iommu, sdev->dev,
-						    svm->pasid);
+						    svm->pasid, true);
 			kfree_rcu(sdev, rcu);
 
 			/*
