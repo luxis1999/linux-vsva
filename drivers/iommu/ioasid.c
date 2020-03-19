@@ -39,6 +39,8 @@ struct ioasid_data {
 static ioasid_t ioasid_capacity;
 static ioasid_t ioasid_capacity_avail;
 
+int system_ioasid_sid;
+
 /* System capacity can only be set once */
 static bool ioasid_capacity_set = false;
 void ioasid_install_capacity(ioasid_t total)

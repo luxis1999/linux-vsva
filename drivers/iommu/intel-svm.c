@@ -28,6 +28,7 @@ static irqreturn_t prq_event_thread(int irq, void *d);
  * allocation and notification.
  */
 static bool ioasid_ready;
+static DECLARE_IOASID_SET(system_ioasid);
 
 #define PRQ_ORDER 0
 
@@ -119,6 +120,9 @@ void intel_svm_check(struct intel_iommu *iommu)
 	iommu->flags |= VTD_FLAG_SVM_CAPABLE;
 	if (!ioasid_ready) {
 		ioasid_install_capacity(intel_pasid_max_id);
+		/* We should not run out of IOASIDs at boot */
+		WARN_ON(ioasid_alloc_set(&system_ioasid, PID_MAX_DEFAULT,
+					 &system_ioasid_sid));
 		ioasid_ready = true;
 	}
 }

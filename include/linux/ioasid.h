@@ -29,6 +29,9 @@ struct ioasid_allocator_ops {
 	void *pdata;
 };
 
+/* Shared IOASID set for reserved for host system use */
+extern int system_ioasid_sid;
+
 #define DECLARE_IOASID_SET(name) struct ioasid_set name = { 0 }
 
 #if IS_ENABLED(CONFIG_IOASID)
