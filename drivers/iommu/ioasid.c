@@ -31,7 +31,7 @@ struct ioasid_set_data {
 
 struct ioasid_data {
 	ioasid_t id;
-	struct ioasid_set *set;
+	struct ioasid_set_data *sdata;
 	void *private;
 	struct rcu_head rcu;
 };
@@ -329,7 +329,7 @@ EXPORT_SYMBOL_GPL(ioasid_attach_data);
 
 /**
  * ioasid_alloc - Allocate an IOASID
- * @set: the IOASID set
+ * @sid: the IOASID set ID
  * @min: the minimum ID (inclusive)
  * @max: the maximum ID (inclusive)
  * @private: data private to the caller
@@ -339,18 +339,30 @@ EXPORT_SYMBOL_GPL(ioasid_attach_data);
  *
  * Return: the allocated ID on success, or %INVALID_IOASID on failure.
  */
-ioasid_t ioasid_alloc(struct ioasid_set *set, ioasid_t min, ioasid_t max,
-		      void *private)
+ioasid_t ioasid_alloc(int sid, ioasid_t min, ioasid_t max, void *private)
 {
+	struct ioasid_set_data *sdata;
 	struct ioasid_data *data;
 	void *adata;
 	ioasid_t id;
 
-	data = kzalloc(sizeof(*data), GFP_ATOMIC);
+	/* Check if the IOASID set has been allocated and initialized */
+	sdata = xa_load(&ioasid_sets, sid);
+	if (!sdata) {
+		pr_err("Invalid IOASID set %d to allocate from\n", sid);
+		return INVALID_IOASID;
+	}
+
+	if (sdata->size <= sdata->nr_ioasids) {
+		pr_err("IOASID set %d out of quota\n", sid);
+		return INVALID_IOASID;
+	}
+
+	data = kzalloc(sizeof(*data), GFP_KERNEL);
 	if (!data)
 		return INVALID_IOASID;
 
-	data->set = set;
+	data->sdata = sdata;
 	data->private = private;
 
 	/*
@@ -374,6 +386,9 @@ ioasid_t ioasid_alloc(struct ioasid_set *set, ioasid_t min, ioasid_t max,
 	}
 	data->id = id;
 
+	/* Store IOASID in the per set data */
+	xa_store(&sdata->xa, id, data, GFP_KERNEL);
+	sdata->nr_ioasids++;
 	spin_unlock(&ioasid_allocator_lock);
 	return id;
 exit_free:
@@ -383,19 +398,15 @@ exit_free:
 }
 EXPORT_SYMBOL_GPL(ioasid_alloc);
 
-/**
- * ioasid_free - Free an IOASID
- * @ioasid: the ID to remove
- */
-void ioasid_free(ioasid_t ioasid)
+static void ioasid_free_locked(ioasid_t ioasid)
 {
 	struct ioasid_data *ioasid_data;
+	struct ioasid_set_data *sdata;
 
-	spin_lock(&ioasid_allocator_lock);
 	ioasid_data = xa_load(&active_allocator->xa, ioasid);
 	if (!ioasid_data) {
 		pr_err("Trying to free unknown IOASID %u\n", ioasid);
-		goto exit_unlock;
+		return;
 	}
 
 	active_allocator->ops->free(ioasid, active_allocator->ops->pdata);
@@ -405,7 +416,27 @@ void ioasid_free(ioasid_t ioasid)
 		kfree_rcu(ioasid_data, rcu);
 	}
 
-exit_unlock:
+	sdata = xa_load(&ioasid_sets, ioasid_data->sdata->sid);
+	if (!sdata) {
+		pr_err("No set %d for IOASID %d\n", ioasid_data->sdata->sid,
+		       ioasid);
+		return;
+	}
+	xa_erase(&sdata->xa, ioasid);
+	sdata->nr_ioasids--;
+}
+
+/**
+ * ioasid_free - Free an IOASID and notify users who registered a notifier
+ *               on the IOASID set.
+ *               IOASID can be re-allocated upon return
+ *
+ * @ioasid: the ID to remove
+ */
+void ioasid_free(ioasid_t ioasid)
+{
+	spin_lock(&ioasid_allocator_lock);
+	ioasid_free_locked(ioasid);
 	spin_unlock(&ioasid_allocator_lock);
 }
 EXPORT_SYMBOL_GPL(ioasid_free);
@@ -494,8 +525,12 @@ void ioasid_free_set(int sid, bool destroy_set)
 		goto done_destroy;
 	}
 
-	/* Just a place holder for now */
 	xa_for_each(&sdata->xa, index, entry) {
+		/*
+		 * Free from system-wide IOASID pool, all subscribers gets
+		 * notified and do cleanup.
+		 */
+		ioasid_free_locked(index);
 		/* Free from per sub-set pool */
 		xa_erase(&sdata->xa, index);
 	}
@@ -503,7 +538,6 @@ void ioasid_free_set(int sid, bool destroy_set)
 done_destroy:
 	if (destroy_set) {
 		xa_erase(&ioasid_sets, sid);
-
 		/* Return the quota back to system pool */
 		ioasid_capacity_avail += sdata->size;
 		kfree_rcu(sdata, rcu);
@@ -517,7 +551,7 @@ EXPORT_SYMBOL_GPL(ioasid_free_set);
 
 /**
  * ioasid_find - Find IOASID data
- * @set: the IOASID set
+ * @sid: the IOASID set ID
  * @ioasid: the IOASID to find
  * @getter: function to call on the found object
  *
@@ -527,10 +561,12 @@ EXPORT_SYMBOL_GPL(ioasid_free_set);
  *
  * If the IOASID exists, return the private pointer passed to ioasid_alloc.
  * Private data can be NULL if not set. Return an error if the IOASID is not
- * found, or if @set is not NULL and the IOASID does not belong to the set.
+ * found.
+ *
+ * If sid is INVALID_IOASID_SET, it will skip set ownership checking. Otherwise,
+ * error is returned even if the IOASID is found but does not belong the set.
  */
-void *ioasid_find(struct ioasid_set *set, ioasid_t ioasid,
-		  bool (*getter)(void *))
+void *ioasid_find(int sid, ioasid_t ioasid, bool (*getter)(void *))
 {
 	void *priv;
 	struct ioasid_data *ioasid_data;
@@ -543,7 +579,7 @@ void *ioasid_find(struct ioasid_set *set, ioasid_t ioasid,
 		priv = ERR_PTR(-ENOENT);
 		goto unlock;
 	}
-	if (set && ioasid_data->set != set) {
+	if (sid != INVALID_IOASID_SET && ioasid_data->sdata->sid != sid) {
 		/* data found but does not belong to the set */
 		priv = ERR_PTR(-EACCES);
 		goto unlock;
@@ -558,6 +594,29 @@ unlock:
 	return priv;
 }
 EXPORT_SYMBOL_GPL(ioasid_find);
+
+/**
+ * ioasid_find_sid - Retrieve IOASID set ID from an ioasid
+ *                   Caller must hold a reference to the set.
+ *
+ * @ioasid: IOASID associated with the set
+ *
+ * Return IOASID set ID or error
+ */
+int ioasid_find_sid(ioasid_t ioasid)
+{
+	struct ioasid_data *ioasid_data;
+	int ret = 0;
+
+	spin_lock(&ioasid_allocator_lock);
+	ioasid_data = xa_load(&active_allocator->xa, ioasid);
+	ret = (ioasid_data) ? ioasid_data->sdata->sid : -ENOENT;
+
+	spin_unlock(&ioasid_allocator_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ioasid_find_sid);
 
 MODULE_AUTHOR("Jean-Philippe Brucker <jean-philippe.brucker@arm.com>");
 MODULE_AUTHOR("Jacob Pan <jacob.jun.pan@linux.intel.com>");

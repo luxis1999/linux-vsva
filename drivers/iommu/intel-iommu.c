@@ -3323,11 +3323,11 @@ static void intel_ioasid_free(ioasid_t ioasid, void *data)
 	if (!iommu)
 		return;
 	/*
-	 * Sanity check the ioasid owner is done at upper layer, e.g. VFIO
-	 * We can only free the PASID when all the devices are unbound.
+	 * In the guest, all IOASIDs belong to the system_ioasid set.
+	 * Sanity check against the system set.
 	 */
-	if (ioasid_find(NULL, ioasid, NULL)) {
-		pr_alert("Cannot free active IOASID %d\n", ioasid);
+	if (IS_ERR(ioasid_find(system_ioasid_sid, ioasid, NULL))) {
+		pr_err("Cannot free IOASID %d, not in system set\n", ioasid);
 		return;
 	}
 	vcmd_free_pasid(iommu, ioasid);
@@ -5531,7 +5531,7 @@ static int aux_domain_add_dev(struct dmar_domain *domain,
 		int pasid;
 
 		/* No private data needed for the default pasid */
-		pasid = ioasid_alloc(NULL, PASID_MIN,
+		pasid = ioasid_alloc(system_ioasid_sid, PASID_MIN,
 				     pci_max_pasids(to_pci_dev(dev)) - 1,
 				     NULL);
 		if (pasid == INVALID_IOASID) {
