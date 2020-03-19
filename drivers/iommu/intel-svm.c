@@ -273,7 +273,7 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 	dmar_domain = to_dmar_domain(domain);
 
 	mutex_lock(&pasid_mutex);
-	svm = ioasid_find(NULL, data->hpasid, NULL);
+	svm = ioasid_find(INVALID_IOASID_SET, data->hpasid, NULL);
 	if (IS_ERR(svm)) {
 		ret = PTR_ERR(svm);
 		goto out;
@@ -391,7 +391,7 @@ int intel_svm_unbind_gpasid(struct device *dev, int pasid)
 		return -EINVAL;
 
 	mutex_lock(&pasid_mutex);
-	svm = ioasid_find(NULL, pasid, NULL);
+	svm = ioasid_find(INVALID_IOASID_SET, pasid, NULL);
 	if (!svm) {
 		ret = -EINVAL;
 		goto out;
@@ -538,7 +538,7 @@ intel_svm_bind_mm(struct device *dev, int flags, struct svm_dev_ops *ops,
 			pasid_max = intel_pasid_max_id;
 
 		/* Do not use PASID 0, reserved for RID to PASID */
-		svm->pasid = ioasid_alloc(NULL, PASID_MIN,
+		svm->pasid = ioasid_alloc(system_ioasid_sid, PASID_MIN,
 					  pasid_max - 1, svm);
 		if (svm->pasid == INVALID_IOASID) {
 			kfree(svm);
@@ -621,7 +621,7 @@ int intel_svm_unbind_mm(struct device *dev, int pasid)
 	if (!iommu)
 		goto out;
 
-	svm = ioasid_find(NULL, pasid, NULL);
+	svm = ioasid_find(system_ioasid_sid, pasid, NULL);
 	if (!svm)
 		goto out;
 
