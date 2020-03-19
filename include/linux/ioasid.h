@@ -6,6 +6,7 @@
 #include <linux/errno.h>
 
 #define INVALID_IOASID ((ioasid_t)-1)
+#define INVALID_IOASID_SET (-1)
 typedef unsigned int ioasid_t;
 typedef ioasid_t (*ioasid_alloc_fn_t)(ioasid_t min, ioasid_t max, void *data);
 typedef void (*ioasid_free_fn_t)(ioasid_t ioasid, void *data);
@@ -35,11 +36,10 @@ extern int system_ioasid_sid;
 #define DECLARE_IOASID_SET(name) struct ioasid_set name = { 0 }
 
 #if IS_ENABLED(CONFIG_IOASID)
-ioasid_t ioasid_alloc(struct ioasid_set *set, ioasid_t min, ioasid_t max,
+ioasid_t ioasid_alloc(int sid, ioasid_t min, ioasid_t max,
 		      void *private);
 void ioasid_free(ioasid_t ioasid);
-void *ioasid_find(struct ioasid_set *set, ioasid_t ioasid,
-		  bool (*getter)(void *));
+void *ioasid_find(int sid, ioasid_t ioasid, bool (*getter)(void *));
 int ioasid_register_allocator(struct ioasid_allocator_ops *allocator);
 void ioasid_unregister_allocator(struct ioasid_allocator_ops *allocator);
 int ioasid_attach_data(ioasid_t ioasid, void *data);
@@ -48,7 +48,7 @@ int ioasid_alloc_system_set(int quota);
 int ioasid_alloc_set(struct ioasid_set *token, ioasid_t quota, int *sid);
 void ioasid_free_set(int sid, bool destroy_set);
 #else /* !CONFIG_IOASID */
-static inline ioasid_t ioasid_alloc(struct ioasid_set *set, ioasid_t min,
+static inline ioasid_t ioasid_alloc(int sid, ioasid_t min,
 				    ioasid_t max, void *private)
 {
 	return INVALID_IOASID;
@@ -67,8 +67,7 @@ static inline void ioasid_free_set(int sid, bool destroy_set)
 {
 }
 
-static inline void *ioasid_find(struct ioasid_set *set, ioasid_t ioasid,
-				bool (*getter)(void *))
+static inline void *ioasid_find(int sid, ioasid_t ioasid, bool (*getter)(void *))
 {
 	return NULL;
 }
