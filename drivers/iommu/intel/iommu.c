@@ -3280,8 +3280,14 @@ static int __init init_dmars(void)
 		goto free_iommu;
 
 	/* PASID is needed for scalable mode irrespective to SVM */
-	if (intel_iommu_sm)
+	if (intel_iommu_sm) {
 		ioasid_install_capacity(intel_pasid_max_id);
+		/* We should not run out of IOASIDs at boot */
+		if (ioasid_alloc_system_set(PID_MAX_DEFAULT)) {
+			pr_err("Failed to enable host PASID allocator\n");
+			intel_iommu_sm = 0;
+		}
+	}
 
 	/*
 	 * for each drhd

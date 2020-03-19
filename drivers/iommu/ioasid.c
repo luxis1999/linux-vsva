@@ -39,6 +39,9 @@ struct ioasid_data {
 static ioasid_t ioasid_capacity;
 static ioasid_t ioasid_capacity_avail;
 
+int system_ioasid_sid;
+static DECLARE_IOASID_SET(system_ioasid);
+
 /* System capacity can only be set once */
 void ioasid_install_capacity(ioasid_t total)
 {
@@ -50,6 +53,12 @@ void ioasid_install_capacity(ioasid_t total)
 	ioasid_capacity = ioasid_capacity_avail = total;
 }
 EXPORT_SYMBOL_GPL(ioasid_install_capacity);
+
+int ioasid_alloc_system_set(int quota)
+{
+	return ioasid_alloc_set(&system_ioasid, quota, &system_ioasid_sid);
+}
+EXPORT_SYMBOL_GPL(ioasid_alloc_system_set);
 
 /*
  * struct ioasid_allocator_data - Internal data structure to hold information
