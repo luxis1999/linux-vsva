@@ -98,7 +98,7 @@ struct ioasid_allocator_data {
 	struct rcu_head rcu;
 };
 
-static DEFINE_SPINLOCK(ioasid_allocator_lock);
+static DEFINE_MUTEX(ioasid_allocator_lock);
 static LIST_HEAD(allocators_list);
 
 static ioasid_t default_alloc(ioasid_t min, ioasid_t max, void *opaque);
@@ -121,7 +121,7 @@ static ioasid_t default_alloc(ioasid_t min, ioasid_t max, void *opaque)
 {
 	ioasid_t id;
 
-	if (xa_alloc(&default_allocator.xa, &id, opaque, XA_LIMIT(min, max), GFP_ATOMIC)) {
+	if (xa_alloc(&default_allocator.xa, &id, opaque, XA_LIMIT(min, max), GFP_KERNEL)) {
 		pr_err("Failed to alloc ioasid from %d to %d\n", min, max);
 		return INVALID_IOASID;
 	}
@@ -142,7 +142,7 @@ static struct ioasid_allocator_data *ioasid_alloc_allocator(struct ioasid_alloca
 {
 	struct ioasid_allocator_data *ia_data;
 
-	ia_data = kzalloc(sizeof(*ia_data), GFP_ATOMIC);
+	ia_data = kzalloc(sizeof(*ia_data), GFP_KERNEL);
 	if (!ia_data)
 		return NULL;
 
@@ -184,7 +184,7 @@ int ioasid_register_allocator(struct ioasid_allocator_ops *ops)
 	struct ioasid_allocator_data *pallocator;
 	int ret = 0;
 
-	spin_lock(&ioasid_allocator_lock);
+	mutex_lock(&ioasid_allocator_lock);
 
 	ia_data = ioasid_alloc_allocator(ops);
 	if (!ia_data) {
@@ -228,12 +228,12 @@ int ioasid_register_allocator(struct ioasid_allocator_ops *ops)
 	}
 	list_add_tail(&ia_data->list, &allocators_list);
 
-	spin_unlock(&ioasid_allocator_lock);
+	mutex_unlock(&ioasid_allocator_lock);
 	return 0;
 out_free:
 	kfree(ia_data);
 out_unlock:
-	spin_unlock(&ioasid_allocator_lock);
+	mutex_unlock(&ioasid_allocator_lock);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(ioasid_register_allocator);
@@ -251,7 +251,7 @@ void ioasid_unregister_allocator(struct ioasid_allocator_ops *ops)
 	struct ioasid_allocator_data *pallocator;
 	struct ioasid_allocator_ops *sops;
 
-	spin_lock(&ioasid_allocator_lock);
+	mutex_lock(&ioasid_allocator_lock);
 	if (list_empty(&allocators_list)) {
 		pr_warn("No custom IOASID allocators active!\n");
 		goto exit_unlock;
@@ -296,7 +296,7 @@ void ioasid_unregister_allocator(struct ioasid_allocator_ops *ops)
 	}
 
 exit_unlock:
-	spin_unlock(&ioasid_allocator_lock);
+	mutex_unlock(&ioasid_allocator_lock);
 }
 EXPORT_SYMBOL_GPL(ioasid_unregister_allocator);
 
@@ -313,13 +313,13 @@ int ioasid_attach_data(ioasid_t ioasid, void *data)
 	struct ioasid_data *ioasid_data;
 	int ret = 0;
 
-	spin_lock(&ioasid_allocator_lock);
+	mutex_lock(&ioasid_allocator_lock);
 	ioasid_data = xa_load(&active_allocator->xa, ioasid);
 	if (ioasid_data)
 		rcu_assign_pointer(ioasid_data->private, data);
 	else
 		ret = -ENOENT;
-	spin_unlock(&ioasid_allocator_lock);
+	mutex_unlock(&ioasid_allocator_lock);
 
 	/*
 	 * Wait for readers to stop accessing the old private data, so the
@@ -374,7 +374,7 @@ ioasid_t ioasid_alloc(int sid, ioasid_t min, ioasid_t max, void *private)
 	 * Custom allocator needs allocator data to perform platform specific
 	 * operations.
 	 */
-	spin_lock(&ioasid_allocator_lock);
+	mutex_lock(&ioasid_allocator_lock);
 	adata = active_allocator->flags & IOASID_ALLOCATOR_CUSTOM ? active_allocator->ops->pdata : data;
 	id = active_allocator->ops->alloc(min, max, adata);
 	if (id == INVALID_IOASID) {
@@ -383,7 +383,7 @@ ioasid_t ioasid_alloc(int sid, ioasid_t min, ioasid_t max, void *private)
 	}
 
 	if ((active_allocator->flags & IOASID_ALLOCATOR_CUSTOM) &&
-	     xa_alloc(&active_allocator->xa, &id, data, XA_LIMIT(id, id), GFP_ATOMIC)) {
+	     xa_alloc(&active_allocator->xa, &id, data, XA_LIMIT(id, id), GFP_KERNEL)) {
 		/* Custom allocator needs framework to store and track allocation results */
 		pr_err("Failed to alloc ioasid from %d\n", id);
 		active_allocator->ops->free(id, active_allocator->ops->pdata);
@@ -394,10 +394,11 @@ ioasid_t ioasid_alloc(int sid, ioasid_t min, ioasid_t max, void *private)
 	/* Store IOASID in the per set data */
 	xa_store(&sdata->xa, id, data, GFP_KERNEL);
 	sdata->nr_ioasids++;
-	spin_unlock(&ioasid_allocator_lock);
+	mutex_unlock(&ioasid_allocator_lock);
+
 	return id;
 exit_free:
-	spin_unlock(&ioasid_allocator_lock);
+	mutex_unlock(&ioasid_allocator_lock);
 	kfree(data);
 	return INVALID_IOASID;
 }
@@ -440,9 +441,9 @@ static void ioasid_free_locked(ioasid_t ioasid)
  */
 void ioasid_free(ioasid_t ioasid)
 {
-	spin_lock(&ioasid_allocator_lock);
+	mutex_lock(&ioasid_allocator_lock);
 	ioasid_free_locked(ioasid);
-	spin_unlock(&ioasid_allocator_lock);
+	mutex_unlock(&ioasid_allocator_lock);
 }
 EXPORT_SYMBOL_GPL(ioasid_free);
 
@@ -473,7 +474,7 @@ int ioasid_alloc_set(struct ioasid_set *token, ioasid_t quota, int *sid)
 	if (!sdata)
 		return -ENOMEM;
 
-	spin_lock(&ioasid_allocator_lock);
+	mutex_lock(&ioasid_allocator_lock);
 
 	ret = xa_alloc(&ioasid_sets, &id, sdata,
 		       XA_LIMIT(0, ioasid_capacity_avail - quota),
@@ -497,7 +498,7 @@ int ioasid_alloc_set(struct ioasid_set *token, ioasid_t quota, int *sid)
 	*sid = id;
 
 error:
-	spin_unlock(&ioasid_allocator_lock);
+	mutex_unlock(&ioasid_allocator_lock);
 
 	return ret;
 }
@@ -518,7 +519,7 @@ void ioasid_free_set(int sid, bool destroy_set)
 	struct ioasid_data *entry;
 	unsigned long index;
 
-	spin_lock(&ioasid_allocator_lock);
+	mutex_lock(&ioasid_allocator_lock);
 	sdata = xa_load(&ioasid_sets, sid);
 	if (!sdata) {
 		pr_err("No IOASID set found to free %d\n", sid);
@@ -549,7 +550,7 @@ done_destroy:
 	}
 
 done_unlock:
-	spin_unlock(&ioasid_allocator_lock);
+	mutex_unlock(&ioasid_allocator_lock);
 }
 EXPORT_SYMBOL_GPL(ioasid_free_set);
 
