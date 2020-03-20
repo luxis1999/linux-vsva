@@ -72,6 +72,7 @@ int ioasid_alloc_system_set(int quota);
 int ioasid_alloc_set(struct ioasid_set *token, ioasid_t quota, int *sid);
 void ioasid_free_set(int sid, bool destroy_set);
 int ioasid_notify(ioasid_t id, enum ioasid_notify_val cmd);
+int ioasid_adjust_set(int sid, int quota);
 
 #else /* !CONFIG_IOASID */
 static inline ioasid_t ioasid_alloc(int sid, ioasid_t min,
@@ -131,6 +132,11 @@ static inline void ioasid_install_capacity(ioasid_t total)
 }
 
 static inline int ioasid_alloc_system_set(int quota)
+{
+	return -ENOTSUPP;
+}
+
+static inline int ioasid_adjust_set(int sid, int quota)
 {
 	return -ENOTSUPP;
 }
