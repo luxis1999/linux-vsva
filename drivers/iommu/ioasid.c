@@ -573,6 +573,50 @@ done_unlock:
 }
 EXPORT_SYMBOL_GPL(ioasid_free_set);
 
+/**
+ * ioasid_adjust_set - Adjust the quota of an IOASID set
+ * @quota:	Quota allowed in this set
+ * @sid:	IOASID set ID to be assigned
+ *
+ * Return 0 on success. If the new quota is smaller than the number of
+ * IOASIDs already allocated, -EINVAL will be returned. No change will be
+ * made to the existing quota.
+ */
+int ioasid_adjust_set(int sid, int quota)
+{
+	struct ioasid_set_data *sdata;
+	int ret = 0;
+
+	mutex_lock(&ioasid_allocator_lock);
+	sdata = xa_load(&ioasid_sets, sid);
+	if (!sdata || sdata->nr_ioasids > quota) {
+		pr_err("Failed to adjust IOASID set %d quota %d\n",
+			sid, quota);
+		ret = -EINVAL;
+		goto done_unlock;
+	}
+
+	if (quota >= ioasid_capacity_avail) {
+		ret = -ENOSPC;
+		goto done_unlock;
+	}
+
+	/* Return the delta back to system pool */
+	ioasid_capacity_avail += sdata->size - quota;
+
+	/*
+	 * May have a policy to prevent giving all available IOASIDs
+	 * to one set. But we don't enforce here, it should be in the
+	 * upper layers.
+	 */
+	sdata->size = quota;
+
+done_unlock:
+	mutex_unlock(&ioasid_allocator_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ioasid_adjust_set);
 
 /**
  * ioasid_find - Find IOASID data
