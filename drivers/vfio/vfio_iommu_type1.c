@@ -2106,6 +2106,23 @@ static int vfio_domains_have_iommu_cache(struct vfio_iommu *iommu)
 	return ret;
 }
 
+static int vfio_iommu_type1_check_extension(struct vfio_iommu *iommu,
+					    unsigned long arg)
+{
+	switch (arg) {
+	case VFIO_TYPE1_IOMMU:
+	case VFIO_TYPE1v2_IOMMU:
+	case VFIO_TYPE1_NESTING_IOMMU:
+		return 1;
+	case VFIO_DMA_CC_IOMMU:
+		if (!iommu)
+			return 0;
+		return vfio_domains_have_iommu_cache(iommu);
+	default:
+		return 0;
+	}
+}
+
 static int vfio_iommu_iova_add_cap(struct vfio_info_cap *caps,
 		 struct vfio_iommu_type1_info_cap_iova_range *cap_iovas,
 		 size_t size)
@@ -2173,110 +2190,120 @@ out_unlock:
 	return ret;
 }
 
+static int vfio_iommu_type1_get_info(struct vfio_iommu *iommu,
+				     unsigned long arg)
+{
+	struct vfio_iommu_type1_info info;
+	unsigned long minsz;
+	struct vfio_info_cap caps = { .buf = NULL, .size = 0 };
+	unsigned long capsz;
+	int ret;
+
+	minsz = offsetofend(struct vfio_iommu_type1_info, iova_pgsizes);
+
+	/* For backward compatibility, cannot require this */
+	capsz = offsetofend(struct vfio_iommu_type1_info, cap_offset);
+
+	if (copy_from_user(&info, (void __user *)arg, minsz))
+		return -EFAULT;
+
+	if (info.argsz < minsz)
+		return -EINVAL;
+
+	if (info.argsz >= capsz) {
+		minsz = capsz;
+		info.cap_offset = 0; /* output, no-recopy necessary */
+	}
+
+	info.flags = VFIO_IOMMU_INFO_PGSIZES;
+
+	info.iova_pgsizes = vfio_pgsize_bitmap(iommu);
+
+	ret = vfio_iommu_iova_build_caps(iommu, &caps);
+	if (ret)
+		return ret;
+
+	if (caps.size) {
+		info.flags |= VFIO_IOMMU_INFO_CAPS;
+
+		if (info.argsz < sizeof(info) + caps.size) {
+			info.argsz = sizeof(info) + caps.size;
+		} else {
+			vfio_info_cap_shift(&caps, sizeof(info));
+			if (copy_to_user((void __user *)arg +
+					sizeof(info), caps.buf,
+					caps.size)) {
+				kfree(caps.buf);
+				return -EFAULT;
+			}
+			info.cap_offset = sizeof(info);
+		}
+
+		kfree(caps.buf);
+	}
+
+	return copy_to_user((void __user *)arg, &info, minsz) ?
+		-EFAULT : 0;
+
+}
+
+static int vfio_iommu_type1_map_dma(struct vfio_iommu *iommu,
+				    unsigned long arg)
+{
+	struct vfio_iommu_type1_dma_map map;
+	unsigned long minsz;
+	uint32_t mask = VFIO_DMA_MAP_FLAG_READ |
+			VFIO_DMA_MAP_FLAG_WRITE;
+
+	minsz = offsetofend(struct vfio_iommu_type1_dma_map, size);
+
+	if (copy_from_user(&map, (void __user *)arg, minsz))
+		return -EFAULT;
+
+	if (map.argsz < minsz || map.flags & ~mask)
+		return -EINVAL;
+
+	return vfio_dma_do_map(iommu, &map);
+}
+
+static int vfio_iommu_type1_unmap_dma(struct vfio_iommu *iommu,
+				    unsigned long arg)
+{
+	struct vfio_iommu_type1_dma_unmap unmap;
+	unsigned long minsz;
+	long ret;
+
+	minsz = offsetofend(struct vfio_iommu_type1_dma_unmap, size);
+
+	if (copy_from_user(&unmap, (void __user *)arg, minsz))
+		return -EFAULT;
+
+	if (unmap.argsz < minsz || unmap.flags)
+		return -EINVAL;
+
+	ret = vfio_dma_do_unmap(iommu, &unmap);
+	if (ret)
+		return ret;
+
+	return copy_to_user((void __user *)arg, &unmap, minsz) ?
+		-EFAULT : 0;
+
+}
+
 static long vfio_iommu_type1_ioctl(void *iommu_data,
 				   unsigned int cmd, unsigned long arg)
 {
 	struct vfio_iommu *iommu = iommu_data;
-	unsigned long minsz;
 
-	if (cmd == VFIO_CHECK_EXTENSION) {
-		switch (arg) {
-		case VFIO_TYPE1_IOMMU:
-		case VFIO_TYPE1v2_IOMMU:
-		case VFIO_TYPE1_NESTING_IOMMU:
-			return 1;
-		case VFIO_DMA_CC_IOMMU:
-			if (!iommu)
-				return 0;
-			return vfio_domains_have_iommu_cache(iommu);
-		default:
-			return 0;
-		}
-	} else if (cmd == VFIO_IOMMU_GET_INFO) {
-		struct vfio_iommu_type1_info info;
-		struct vfio_info_cap caps = { .buf = NULL, .size = 0 };
-		unsigned long capsz;
-		int ret;
-
-		minsz = offsetofend(struct vfio_iommu_type1_info, iova_pgsizes);
-
-		/* For backward compatibility, cannot require this */
-		capsz = offsetofend(struct vfio_iommu_type1_info, cap_offset);
-
-		if (copy_from_user(&info, (void __user *)arg, minsz))
-			return -EFAULT;
-
-		if (info.argsz < minsz)
-			return -EINVAL;
-
-		if (info.argsz >= capsz) {
-			minsz = capsz;
-			info.cap_offset = 0; /* output, no-recopy necessary */
-		}
-
-		info.flags = VFIO_IOMMU_INFO_PGSIZES;
-
-		info.iova_pgsizes = vfio_pgsize_bitmap(iommu);
-
-		ret = vfio_iommu_iova_build_caps(iommu, &caps);
-		if (ret)
-			return ret;
-
-		if (caps.size) {
-			info.flags |= VFIO_IOMMU_INFO_CAPS;
-
-			if (info.argsz < sizeof(info) + caps.size) {
-				info.argsz = sizeof(info) + caps.size;
-			} else {
-				vfio_info_cap_shift(&caps, sizeof(info));
-				if (copy_to_user((void __user *)arg +
-						sizeof(info), caps.buf,
-						caps.size)) {
-					kfree(caps.buf);
-					return -EFAULT;
-				}
-				info.cap_offset = sizeof(info);
-			}
-
-			kfree(caps.buf);
-		}
-
-		return copy_to_user((void __user *)arg, &info, minsz) ?
-			-EFAULT : 0;
-
-	} else if (cmd == VFIO_IOMMU_MAP_DMA) {
-		struct vfio_iommu_type1_dma_map map;
-		uint32_t mask = VFIO_DMA_MAP_FLAG_READ |
-				VFIO_DMA_MAP_FLAG_WRITE;
-
-		minsz = offsetofend(struct vfio_iommu_type1_dma_map, size);
-
-		if (copy_from_user(&map, (void __user *)arg, minsz))
-			return -EFAULT;
-
-		if (map.argsz < minsz || map.flags & ~mask)
-			return -EINVAL;
-
-		return vfio_dma_do_map(iommu, &map);
-
-	} else if (cmd == VFIO_IOMMU_UNMAP_DMA) {
-		struct vfio_iommu_type1_dma_unmap unmap;
-		long ret;
-
-		minsz = offsetofend(struct vfio_iommu_type1_dma_unmap, size);
-
-		if (copy_from_user(&unmap, (void __user *)arg, minsz))
-			return -EFAULT;
-
-		if (unmap.argsz < minsz || unmap.flags)
-			return -EINVAL;
-
-		ret = vfio_dma_do_unmap(iommu, &unmap);
-		if (ret)
-			return ret;
-
-		return copy_to_user((void __user *)arg, &unmap, minsz) ?
-			-EFAULT : 0;
+	switch (cmd) {
+	case VFIO_CHECK_EXTENSION:
+		return vfio_iommu_type1_check_extension(iommu, arg);
+	case VFIO_IOMMU_GET_INFO:
+		return vfio_iommu_type1_get_info(iommu, arg);
+	case VFIO_IOMMU_MAP_DMA:
+		return vfio_iommu_type1_map_dma(iommu, arg);
+	case VFIO_IOMMU_UNMAP_DMA:
+		return vfio_iommu_type1_unmap_dma(iommu, arg);
 	}
 
 	return -ENOTTY;
