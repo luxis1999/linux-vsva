@@ -5508,6 +5508,58 @@ static bool domain_use_flush_queue(void)
 	return r;
 }
 
+static int intel_iommu_get_sva_info(struct iommu_domain *domain,
+					struct iommu_sva_info *info)
+{
+	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
+	u64 cap = VTD_CAP_MASK, ecap = VTD_ECAP_MASK;
+	struct device_domain_info *domain_info;
+	struct iommu_sva_info_vtd vtd;
+	unsigned int size;
+
+	if (!info)
+		return -EINVAL;
+
+	/* Only support userspace SVA under nesting so far */
+	if (!(dmar_domain->flags & DOMAIN_FLAG_NESTING_MODE))
+		return -ENODEV;
+
+	size = sizeof(struct iommu_sva_info);
+	/*
+	 * if provided buffer size is smaller than expected, should
+	 * return 0 and also the expected buffer size to caller.
+	 */
+	if (info->argsz < size) {
+		info->argsz = size;
+		return 0;
+	}
+
+	/*
+	 * arbitrary select the first domain_info as all nesting
+	 * related capabilities should be consistent across iommu
+	 * units.
+	 */
+	domain_info = list_first_entry(&dmar_domain->devices,
+				       struct device_domain_info, link);
+	cap &= domain_info->iommu->cap;
+	ecap &= domain_info->iommu->ecap;
+
+	info->addr_width = dmar_domain->gaw;
+	info->format = IOMMU_PASID_FORMAT_INTEL_VTD;
+	info->features = IOMMU_SVA_FEAT_BIND_PGTBL |
+			 IOMMU_SVA_FEAT_CACHE_INVLD;
+	info->pasid_bits = ilog2(intel_pasid_max_id);
+	memset(&info->padding, 0x0, 12);
+
+	vtd.flags = 0;
+	memset(&vtd.padding, 0x0, 12);
+	vtd.cap_reg = cap & VTD_CAP_MASK;
+	vtd.ecap_reg = ecap & VTD_ECAP_MASK;
+
+	memcpy(&info->vendor.vtd, &vtd, sizeof(vtd));
+	return 0;
+}
+
 static int
 intel_iommu_domain_get_attr(struct iommu_domain *domain,
 			    enum iommu_attr attr, void *data)
@@ -5520,6 +5572,18 @@ intel_iommu_domain_get_attr(struct iommu_domain *domain,
 		case DOMAIN_ATTR_NESTING:
 			*(int *)data = (dmar_domain->flags & DOMAIN_FLAG_NESTING_MODE);
 			return 0;
+		case DOMAIN_ATTR_USVA:
+		{
+			struct iommu_sva_info *info =
+				(struct iommu_sva_info *)data;
+			unsigned long flags;
+			int ret;
+
+			spin_lock_irqsave(&device_domain_lock, flags);
+			ret = intel_iommu_get_sva_info(domain, info);
+			spin_unlock_irqrestore(&device_domain_lock, flags);
+			return ret;
+		}
 		default:
 			return -ENODEV;
 		}
