@@ -332,4 +332,38 @@ struct iommu_gpasid_bind_data {
 	};
 };
 
+struct iommu_nesting_info {
+	__u32	size;
+	__u32	format;
+	__u32	features;
+#define IOMMU_NESTING_FEAT_SYSWIDE_PASID	(1 << 0)
+#define IOMMU_NESTING_FEAT_BIND_PGTBL		(1 << 1)
+#define IOMMU_NESTING_FEAT_CACHE_INVLD		(1 << 2)
+	__u32	flags;
+	__u8	data[];
+};
+
+/*
+ * @flags:	VT-d specific flags. Currently reserved for future
+ *		extension.
+ * @addr_width:	The output addr width of first level/stage translation
+ * @pasid_bits:	Maximum supported PASID bits, 0 represents no PASID
+ *		support.
+ * @cap_reg:	Describe basic capabilities as defined in VT-d capability
+ *		register.
+ * @cap_mask:	Mark valid capability bits in @cap_reg.
+ * @ecap_reg:	Describe the extended capabilities as defined in VT-d
+ *		extended capability register.
+ * @ecap_mask:	Mark the valid capability bits in @ecap_reg.
+ */
+struct iommu_nesting_info_vtd {
+	__u32	flags;
+	__u16	addr_width;
+	__u16	pasid_bits;
+	__u64	cap_reg;
+	__u64	cap_mask;
+	__u64	ecap_reg;
+	__u64	ecap_mask;
+};
+
 #endif /* _UAPI_IOMMU_H */
