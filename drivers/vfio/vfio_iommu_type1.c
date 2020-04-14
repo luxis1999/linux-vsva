@@ -72,6 +72,7 @@ struct vfio_iommu {
 	unsigned int			dma_avail;
 	uint64_t			pgsize_bitmap;
 	struct iommu_nesting_info	*nesting_info;
+	struct vfio_mm			*vmm;
 	bool				v2;
 	bool				nesting;
 	bool				dirty_page_tracking;
@@ -2000,6 +2001,11 @@ static void vfio_iommu_iova_insert_copy(struct vfio_iommu *iommu,
 
 static void vfio_iommu_release_nesting_info(struct vfio_iommu *iommu)
 {
+	if (iommu->vmm) {
+		vfio_mm_put(iommu->vmm);
+		iommu->vmm = NULL;
+	}
+
 	kfree(iommu->nesting_info);
 	iommu->nesting_info = NULL;
 }
@@ -2132,6 +2138,43 @@ static int vfio_iommu_type1_attach_group(void *iommu_data,
 		if (iommu->nesting_info->format == 0) {
 			ret = -ENOENT;
 			goto out_detach;
+		}
+
+		if (iommu->nesting_info->features &
+					IOMMU_NESTING_FEAT_SYSWIDE_PASID) {
+			struct vfio_mm *vmm;
+			struct ioasid_set *set;
+
+			/*
+			 * Current interface supports at most 31 bits PASID
+			 * as VFIO returns PASID allocation result via signed
+			 * int. So if IOMMU vendor driver supports more than
+			 * 31 bits PASID, we should fail attach_group to avoid
+			 * further PASID allocation issue. PCIe spec defines
+			 * 20 bits for PASID, so 31 bits is enough for today
+			 * until PCIe spec increases the bits, and we'll need
+			 * to extend VFIO as well when it happens.
+			 */
+			if (iommu->nesting_info->pasid_bits > 31) {
+				pr_err_ratelimited("VFIO type1 doesn't support pasid bits %d",
+						   iommu->nesting_info->pasid_bits);
+				ret = -EOPNOTSUPP;
+				goto out_detach;
+			}
+
+			vmm = vfio_mm_get_from_task(current);
+			if (IS_ERR(vmm)) {
+				ret = PTR_ERR(vmm);
+				goto out_detach;
+			}
+			iommu->vmm = vmm;
+
+			set = vfio_mm_ioasid_set(vmm);
+			ret = iommu_domain_set_attr(domain->domain,
+						    DOMAIN_ATTR_IOASID_SET,
+						    set);
+			if (ret)
+				goto out_detach;
 		}
 	}
 
@@ -2671,6 +2714,9 @@ static int vfio_iommu_nesting_build_caps(struct vfio_iommu *iommu,
 	nesting_cap.header.id = VFIO_IOMMU_TYPE1_INFO_CAP_NESTING;
 	nesting_cap.header.version = 1;
 
+	if (iommu->vmm)
+		nesting_cap.pasid_quota = vfio_mm_get_pasid_quota(iommu->vmm);
+
 	memcpy(&nesting_cap.info, iommu->nesting_info,
 	       iommu->nesting_info->argsz);
 
@@ -2911,6 +2957,49 @@ out_unlock:
 	return -EINVAL;
 }
 
+static int vfio_iommu_type1_pasid_request(struct vfio_iommu *iommu,
+					  unsigned long arg)
+{
+	struct vfio_iommu_type1_pasid_request req;
+	unsigned int pasid_bits = iommu->nesting_info->pasid_bits;
+	unsigned long minsz;
+	int ret = 0;
+
+	minsz = offsetofend(struct vfio_iommu_type1_pasid_request, range);
+
+	if (copy_from_user(&req, (void __user *)arg, minsz))
+		return -EFAULT;
+
+	if (req.argsz < minsz || (req.flags & ~VFIO_PASID_REQUEST_MASK))
+		return -EINVAL;
+
+	if (req.range.min > req.range.max ||
+	    req.range.min >= (1 << pasid_bits) ||
+	    req.range.max >= (1 << pasid_bits))
+		return -EINVAL;
+
+	mutex_lock(&iommu->lock);
+	if (!iommu->vmm) {
+		mutex_unlock(&iommu->lock);
+		return -EOPNOTSUPP;
+	}
+
+	switch (req.flags & VFIO_PASID_REQUEST_MASK) {
+	case VFIO_IOMMU_FLAG_ALLOC_PASID:
+		ret = vfio_pasid_alloc(iommu->vmm, req.range.min,
+				       req.range.max);
+		break;
+	case VFIO_IOMMU_FLAG_FREE_PASID:
+		vfio_pasid_free_range(iommu->vmm, req.range.min,
+				      req.range.max);
+		break;
+	default:
+		ret = -EINVAL;
+	}
+	mutex_unlock(&iommu->lock);
+	return ret;
+}
+
 static long vfio_iommu_type1_ioctl(void *iommu_data,
 				   unsigned int cmd, unsigned long arg)
 {
@@ -2927,6 +3016,8 @@ static long vfio_iommu_type1_ioctl(void *iommu_data,
 		return vfio_iommu_type1_unmap_dma(iommu, arg);
 	case VFIO_IOMMU_DIRTY_PAGES:
 		return vfio_iommu_type1_dirty_pages(iommu, arg);
+	case VFIO_IOMMU_PASID_REQUEST:
+		return vfio_iommu_type1_pasid_request(iommu, arg);
 	default:
 		return -ENOTTY;
 	}
