@@ -73,6 +73,7 @@ struct vfio_iommu {
 	bool			v2;
 	bool			nesting;
 	struct iommu_nesting_info *nesting_info;
+	struct vfio_mm		*vmm;
 	bool			dirty_page_tracking;
 	bool			pinned_page_dirty_scope;
 };
@@ -1933,6 +1934,17 @@ static void vfio_iommu_iova_insert_copy(struct vfio_iommu *iommu,
 
 	list_splice_tail(iova_copy, iova);
 }
+
+static void vfio_iommu_release_nesting_info(struct vfio_iommu *iommu)
+{
+	if (iommu->vmm) {
+		vfio_mm_put(iommu->vmm);
+		iommu->vmm = NULL;
+	}
+
+	kfree(iommu->nesting_info);
+}
+
 static int vfio_iommu_type1_attach_group(void *iommu_data,
 					 struct iommu_group *iommu_group)
 {
@@ -2067,6 +2079,25 @@ static int vfio_iommu_type1_attach_group(void *iommu_data,
 			goto out_detach;
 		}
 		iommu->nesting_info = info;
+
+		if (info->features & IOMMU_NESTING_FEAT_SYSWIDE_PASID) {
+			struct vfio_mm *vmm;
+			int sid;
+
+			vmm = vfio_mm_get_from_task(current);
+			if (IS_ERR(vmm)) {
+				ret = PTR_ERR(vmm);
+				goto out_detach;
+			}
+			iommu->vmm = vmm;
+
+			sid = vfio_mm_ioasid_sid(vmm);
+			ret = iommu_domain_set_attr(domain->domain,
+						    DOMAIN_ATTR_IOASID_SID,
+						    &sid);
+			if (ret)
+				goto out_detach;
+		}
 	}
 
 	/* Get aperture info */
@@ -2178,7 +2209,8 @@ done:
 	return 0;
 
 out_detach:
-	kfree(iommu->nesting_info);
+	if (iommu->nesting_info)
+		vfio_iommu_release_nesting_info(iommu);
 	vfio_iommu_detach_group(domain, group);
 out_domain:
 	iommu_domain_free(domain->domain);
@@ -2380,7 +2412,8 @@ static void vfio_iommu_type1_detach_group(void *iommu_data,
 				else
 					vfio_iommu_unmap_unpin_reaccount(iommu);
 
-				kfree(iommu->nesting_info);
+				if (iommu->nesting_info)
+					vfio_iommu_release_nesting_info(iommu);
 			}
 			iommu_domain_free(domain->domain);
 			list_del(&domain->next);
@@ -2852,6 +2885,63 @@ out_unlock:
 	return -EINVAL;
 }
 
+static int vfio_iommu_type1_pasid_alloc(struct vfio_iommu *iommu,
+					unsigned int min,
+					unsigned int max)
+{
+	int ret = -ENOTSUPP;
+
+	mutex_lock(&iommu->lock);
+	if (iommu->vmm)
+		ret = vfio_pasid_alloc(iommu->vmm, min, max);
+	mutex_unlock(&iommu->lock);
+	return ret;
+}
+
+static int vfio_iommu_type1_pasid_free(struct vfio_iommu *iommu,
+					unsigned int min,
+					unsigned int max)
+{
+	int ret = -ENOTSUPP;
+
+	mutex_lock(&iommu->lock);
+	if (iommu->vmm) {
+		vfio_pasid_free_range(iommu->vmm, min, max);
+		ret = 0;
+	}
+	mutex_unlock(&iommu->lock);
+	return ret;
+}
+
+static int vfio_iommu_type1_pasid_request(struct vfio_iommu *iommu,
+					  unsigned long arg)
+{
+	struct vfio_iommu_type1_pasid_request req;
+	unsigned long minsz;
+
+	minsz = offsetofend(struct vfio_iommu_type1_pasid_request, range);
+
+	if (copy_from_user(&req, (void __user *)arg, minsz))
+		return -EFAULT;
+
+	if (req.argsz < minsz || (req.flags & ~VFIO_PASID_REQUEST_MASK))
+		return -EINVAL;
+
+	if (req.range.min > req.range.max)
+		return -EINVAL;
+
+	switch (req.flags & VFIO_PASID_REQUEST_MASK) {
+	case VFIO_IOMMU_ALLOC_PASID:
+		return vfio_iommu_type1_pasid_alloc(iommu,
+					req.range.min, req.range.max);
+	case VFIO_IOMMU_FREE_PASID:
+		return vfio_iommu_type1_pasid_free(iommu,
+					req.range.min, req.range.max);
+	default:
+		return -EINVAL;
+	}
+}
+
 static long vfio_iommu_type1_ioctl(void *iommu_data,
 				   unsigned int cmd, unsigned long arg)
 {
@@ -2868,6 +2958,8 @@ static long vfio_iommu_type1_ioctl(void *iommu_data,
 		return vfio_iommu_type1_unmap_dma(iommu, arg);
 	case VFIO_IOMMU_DIRTY_PAGES:
 		return vfio_iommu_type1_dirty_pages(iommu, arg);
+	case VFIO_IOMMU_PASID_REQUEST:
+		return vfio_iommu_type1_pasid_request(iommu, arg);
 	}
 
 	return -ENOTTY;

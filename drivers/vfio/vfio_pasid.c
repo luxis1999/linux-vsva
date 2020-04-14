@@ -54,6 +54,7 @@ void vfio_mm_put(struct vfio_mm *vmm)
 {
 	kref_put_mutex(&vmm->kref, vfio_mm_release, &vfio_pasid.vfio_mm_lock);
 }
+EXPORT_SYMBOL_GPL(vfio_mm_put);
 
 static void vfio_mm_get(struct vfio_mm *vmm)
 {
@@ -103,6 +104,13 @@ out:
 	mmput(mm);
 	return vmm;
 }
+EXPORT_SYMBOL_GPL(vfio_mm_get_from_task);
+
+int vfio_mm_ioasid_sid(struct vfio_mm *vmm)
+{
+	return vmm->ioasid_sid;
+}
+EXPORT_SYMBOL_GPL(vfio_mm_ioasid_sid);
 
 int vfio_pasid_alloc(struct vfio_mm *vmm, int min, int max)
 {
@@ -112,6 +120,7 @@ int vfio_pasid_alloc(struct vfio_mm *vmm, int min, int max)
 
 	return (pasid == INVALID_IOASID) ? -ENOSPC : pasid;
 }
+EXPORT_SYMBOL_GPL(vfio_pasid_alloc);
 
 void vfio_pasid_free_range(struct vfio_mm *vmm,
 			    ioasid_t min, ioasid_t max)
@@ -129,6 +138,7 @@ void vfio_pasid_free_range(struct vfio_mm *vmm,
 	for (; pasid <= max; pasid++)
 		ioasid_free(pasid);
 }
+EXPORT_SYMBOL_GPL(vfio_pasid_free_range);
 
 static int __init vfio_pasid_init(void)
 {
