@@ -196,6 +196,22 @@
 #define ecap_max_handle_mask(e) ((e >> 20) & 0xf)
 #define ecap_sc_support(e)	((e >> 7) & 0x1) /* Snooping Control */
 
+/* Nesting Support Capability Alignment */
+#define VTD_CAP_FL1GP		(1ULL << 56)
+#define VTD_CAP_FL5LP		(1ULL << 60)
+#define VTD_ECAP_PRS		(1ULL << 29)
+#define VTD_ECAP_ERS		(1ULL << 30)
+#define VTD_ECAP_SRS		(1ULL << 31)
+#define VTD_ECAP_EAFS		(1ULL << 34)
+#define VTD_ECAP_PASID		(1ULL << 40)
+
+/* Only capabilities marked in below MASKs are reported */
+#define VTD_CAP_MASK		(VTD_CAP_FL1GP | VTD_CAP_FL5LP)
+
+#define VTD_ECAP_MASK		(VTD_ECAP_PRS | VTD_ECAP_ERS | \
+				 VTD_ECAP_SRS | VTD_ECAP_EAFS | \
+				 VTD_ECAP_PASID)
+
 /* Virtual command interface capability */
 #define vccap_pasid(v)		(((v) & DMA_VCS_PAS)) /* PASID allocation */
 
