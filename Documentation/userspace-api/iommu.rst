@@ -26,6 +26,7 @@ supported user-kernel APIs are as follows:
 2. Bind/Unbind guest PASID table (e.g. ARM SMMU)
 3. Invalidate IOMMU caches upon guest requests
 4. Report errors to the guest and serve page requests
+5. Report userspace SVA related capabilities from IOMMU
 
 Requirements
 ============
@@ -96,7 +97,9 @@ kernel. Simply recompiling existing code with newer kernel header should
 not be an issue in that only existing flags are used.
 
 IOMMU vendor driver should report the below features to IOMMU UAPI
-consumers (e.g. via VFIO).
+consumers (e.g. via VFIO). The feature list is passed via struct
+iommu_sva_info. Any future extensions to this structure follow
+the rule defined in section "Extension Rules & Precautions".
 
 1. IOMMU_NESTING_FEAT_SYSWIDE_PASID
 2. IOMMU_NESTING_FEAT_BIND_PGTBL
