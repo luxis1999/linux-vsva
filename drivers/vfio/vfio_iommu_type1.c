@@ -2580,6 +2580,54 @@ out_unlock_iommu:
 	return ret;
 }
 
+static int vfio_dev_cache_invalidate_fn(struct device *dev, void *data)
+{
+	struct domain_capsule *dc = (struct domain_capsule *)data;
+	struct iommu_cache_invalidate_info *cache_info =
+		(struct iommu_cache_invalidate_info *) dc->data;
+
+	iommu_cache_invalidate(dc->domain, dev, cache_info);
+	return 0;
+}
+
+static long vfio_iommu_invalidate_cache(struct vfio_iommu *iommu,
+			struct iommu_cache_invalidate_info *cache_info)
+{
+	struct domain_capsule dc = { .data = cache_info };
+	struct vfio_group *group;
+	struct vfio_domain *domain;
+	int ret = 0;
+	struct iommu_nesting_info *info;
+
+	mutex_lock(&iommu->lock);
+	/*
+	 * Cache invalidation is required for any nesting IOMMU,
+	 * so no need to check system-wide PASID support.
+	 */
+	info = iommu->nesting_info;
+	if (!info || !(info->features & IOMMU_NESTING_FEAT_CACHE_INVLD)) {
+		ret = -ENOTSUPP;
+		goto out_unlock;
+	}
+
+	group = vfio_find_nesting_group(iommu);
+	if (!group) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	domain = list_first_entry(&iommu->domain_list,
+				      struct vfio_domain, next);
+	dc.group = group;
+	dc.domain = domain->domain;
+	iommu_group_for_each_dev(group->iommu_group, &dc,
+				 vfio_dev_cache_invalidate_fn);
+
+out_unlock:
+	mutex_unlock(&iommu->lock);
+	return ret;
+}
+
 static long vfio_iommu_type1_nesting_op(struct vfio_iommu *iommu,
 					unsigned long arg)
 {
@@ -2602,6 +2650,9 @@ static long vfio_iommu_type1_nesting_op(struct vfio_iommu *iommu,
 	case VFIO_IOMMU_NESTING_OP_BIND_PGTBL:
 	case VFIO_IOMMU_NESTING_OP_UNBIND_PGTBL:
 		data_size = sizeof(struct iommu_gpasid_bind_data);
+		break;
+	case VFIO_IOMMU_NESTING_OP_CACHE_INVLD:
+		data_size = sizeof(struct iommu_cache_invalidate_info);
 		break;
 	default:
 		data_size = 0;
@@ -2637,6 +2688,14 @@ static long vfio_iommu_type1_nesting_op(struct vfio_iommu *iommu,
 				(struct iommu_gpasid_bind_data *) data;
 
 		ret = vfio_iommu_pgtbl_op(iommu, false, bind_data);
+		break;
+	}
+	case VFIO_IOMMU_NESTING_OP_CACHE_INVLD:
+	{
+		struct iommu_cache_invalidate_info *cache_info =
+				(struct iommu_cache_invalidate_info *)data;
+
+		ret = vfio_iommu_invalidate_cache(iommu, cache_info);
 		break;
 	}
 	default:
