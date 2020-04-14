@@ -1039,6 +1039,22 @@ struct vfio_iommu_type1_info_cap_migration {
 	__u64	max_dirty_bitmap_size;		/* in bytes */
 };
 
+#define VFIO_IOMMU_TYPE1_INFO_CAP_NESTING  3
+
+/*
+ * Reporting nesting info to user space.
+ *
+ * @info:	the nesting info provided by IOMMU driver. Today
+ *		it is expected to be a struct iommu_nesting_info
+ *		data.
+ */
+struct vfio_iommu_type1_info_cap_nesting {
+	struct	vfio_info_cap_header header;
+	__u32	flags;
+	__u32	padding;
+	__u8	info[];
+};
+
 #define VFIO_IOMMU_GET_INFO _IO(VFIO_TYPE, VFIO_BASE + 12)
 
 /**
