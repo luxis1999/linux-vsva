@@ -332,4 +332,63 @@ struct iommu_gpasid_bind_data {
 	} vendor;
 };
 
+/*
+ * struct iommu_nesting_info - Information for nesting-capable IOMMU.
+ *				user space should check it before using
+ *				nesting capability.
+ *
+ * @size:	size of the whole structure
+ * @format:	PASID table entry format, the same definition with
+ *		@format of struct iommu_gpasid_bind_data.
+ * @features:	supported nesting features.
+ * @flags:	currently reserved for future extension.
+ * @data:	vendor specific cap info.
+ *
+ * +---------------+----------------------------------------------------+
+ * | feature       |  Notes                                             |
+ * +===============+====================================================+
+ * | SYSWIDE_PASID |  Kernel manages PASID in system wide, PASIDs used  |
+ * |               |  in the system should be allocated by host kernel  |
+ * +---------------+----------------------------------------------------+
+ * | BIND_PGTBL    |  bind page tables to host PASID, the PASID could   |
+ * |               |  either be a host PASID passed in bind request or  |
+ * |               |  default PASIDs (e.g. default PASID of aux-domain) |
+ * +---------------+----------------------------------------------------+
+ * | CACHE_INVLD   |  mandatory feature for nesting capable IOMMU       |
+ * +---------------+----------------------------------------------------+
+ *
+ */
+struct iommu_nesting_info {
+	__u32	size;
+	__u32	format;
+	__u32	features;
+#define IOMMU_NESTING_FEAT_SYSWIDE_PASID	(1 << 0)
+#define IOMMU_NESTING_FEAT_BIND_PGTBL		(1 << 1)
+#define IOMMU_NESTING_FEAT_CACHE_INVLD		(1 << 2)
+	__u32	flags;
+	__u8	data[];
+};
+
+/*
+ * struct iommu_nesting_info_vtd - Intel VT-d specific nesting info
+ *
+ *
+ * @flags:	VT-d specific flags. Currently reserved for future
+ *		extension.
+ * @addr_width:	The output addr width of first level/stage translation
+ * @pasid_bits:	Maximum supported PASID bits, 0 represents no PASID
+ *		support.
+ * @cap_reg:	Describe basic capabilities as defined in VT-d capability
+ *		register.
+ * @ecap_reg:	Describe the extended capabilities as defined in VT-d
+ *		extended capability register.
+ */
+struct iommu_nesting_info_vtd {
+	__u32	flags;
+	__u16	addr_width;
+	__u16	pasid_bits;
+	__u64	cap_reg;
+	__u64	ecap_reg;
+};
+
 #endif /* _UAPI_IOMMU_H */
