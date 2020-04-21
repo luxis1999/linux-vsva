@@ -130,6 +130,33 @@ struct vfio_regions {
 #define IS_DOMAIN_IN_CONTAINER(iommu)	((iommu->external_domain) || \
 					 (!list_empty(&iommu->domain_list)))
 
+struct domain_capsule {
+	struct vfio_group *group;
+	struct iommu_domain *domain;
+	void *data;
+};
+
+/* iommu->lock must be held */
+static struct vfio_group *vfio_find_nesting_group(struct vfio_iommu *iommu)
+{
+	struct vfio_domain *d;
+	struct vfio_group *g, *group = NULL;
+
+	if (!iommu->nesting_info)
+		return NULL;
+
+	/* only support singleton container with nesting type */
+	list_for_each_entry(d, &iommu->domain_list, next) {
+		list_for_each_entry(g, &d->group_list, next) {
+			if (!group) {
+				group = g;
+				break;
+			}
+		}
+	}
+	return group;
+}
+
 static int put_pfn(unsigned long pfn, int prot);
 
 /*
@@ -2014,6 +2041,36 @@ done:
 	return ret;
 }
 
+static int vfio_dev_bind_gpasid_fn(struct device *dev, void *data)
+{
+	struct domain_capsule *dc = (struct domain_capsule *)data;
+	struct iommu_gpasid_bind_data *bind_data =
+		(struct iommu_gpasid_bind_data *) dc->data;
+
+	return iommu_sva_bind_gpasid(dc->domain, dev, bind_data);
+}
+
+static int vfio_dev_unbind_gpasid_fn(struct device *dev, void *data)
+{
+	struct domain_capsule *dc = (struct domain_capsule *)data;
+	struct iommu_gpasid_bind_data *bind_data =
+		(struct iommu_gpasid_bind_data *) dc->data;
+
+	iommu_sva_unbind_gpasid(dc->domain, dev, bind_data);
+	return 0;
+}
+
+static void vfio_group_unbind_gpasid_fn(unsigned int pasid, void *data)
+{
+	struct domain_capsule *dc = (struct domain_capsule *) data;
+	struct iommu_gpasid_bind_data bind_data = { .hpasid = pasid,
+						    .flags = 0 };
+
+	dc->data = &bind_data;
+	iommu_group_for_each_dev(dc->group->iommu_group,
+				 dc, vfio_dev_unbind_gpasid_fn);
+}
+
 static void vfio_iommu_type1_detach_group(void *iommu_data,
 					  struct iommu_group *iommu_group)
 {
@@ -2054,6 +2111,21 @@ static void vfio_iommu_type1_detach_group(void *iommu_data,
 		group = find_iommu_group(domain, iommu_group);
 		if (!group)
 			continue;
+
+		if (iommu->nesting_info && iommu->vmm &&
+		    (iommu->nesting_info->features &
+					IOMMU_NESTING_FEAT_BIND_PGTBL)) {
+			struct domain_capsule dc = { .group = group,
+						     .domain = domain->domain,
+						     .data = NULL };
+
+			/*
+			 * Unbind page tables bound with system wide PASIDs
+			 * which are allocated to user space.
+			 */
+			vfio_mm_for_each_pasid(iommu->vmm, &dc,
+					       vfio_group_unbind_gpasid_fn);
+		}
 
 		vfio_iommu_detach_group(domain, group);
 		list_del(&group->next);
@@ -2453,6 +2525,129 @@ static int vfio_iommu_type1_pasid_request(struct vfio_iommu *iommu,
 	}
 }
 
+static long vfio_iommu_pgtbl_op(struct vfio_iommu *iommu, bool is_bind,
+				struct iommu_gpasid_bind_data *bind_data)
+{
+	struct iommu_nesting_info *info;
+	struct domain_capsule dc = { .data = bind_data };
+	struct vfio_group *group;
+	struct vfio_domain *domain;
+	int ret;
+
+	mutex_lock(&iommu->lock);
+
+	info = iommu->nesting_info;
+	if (!info || !(info->features & IOMMU_NESTING_FEAT_BIND_PGTBL)) {
+		ret = -ENOTSUPP;
+		goto out_unlock_iommu;
+	}
+
+	if (!iommu->vmm) {
+		ret = -EINVAL;
+		goto out_unlock_iommu;
+	}
+
+	/* Avoid race with other containers within the same process */
+	vfio_mm_pasid_lock(iommu->vmm);
+
+	group = vfio_find_nesting_group(iommu);
+	if (!group) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	domain = list_first_entry(&iommu->domain_list,
+				      struct vfio_domain, next);
+	dc.group = group;
+	dc.domain = domain->domain;
+
+	if (is_bind) {
+		ret = iommu_group_for_each_dev(group->iommu_group, &dc,
+					       vfio_dev_bind_gpasid_fn);
+		if (ret)
+			iommu_group_for_each_dev(group->iommu_group, &dc,
+						 vfio_dev_unbind_gpasid_fn);
+	} else {
+		iommu_group_for_each_dev(group->iommu_group,
+					 &dc, vfio_dev_unbind_gpasid_fn);
+		ret = 0;
+	}
+
+out_unlock:
+	vfio_mm_pasid_unlock(iommu->vmm);
+out_unlock_iommu:
+	mutex_unlock(&iommu->lock);
+	return ret;
+}
+
+static long vfio_iommu_type1_nesting_op(struct vfio_iommu *iommu,
+					unsigned long arg)
+{
+	struct vfio_iommu_type1_nesting_op hdr;
+	unsigned int minsz;
+	u8 *data = NULL;
+	size_t data_size = 0;
+	int ret;
+
+	minsz = offsetofend(struct vfio_iommu_type1_nesting_op, flags);
+
+	if (copy_from_user(&hdr, (void __user *)arg, minsz))
+		return -EFAULT;
+
+	if (hdr.argsz < minsz || hdr.flags & ~VFIO_NESTING_OP_MASK)
+		return -EINVAL;
+
+	/* Get the current IOMMU UAPI data size */
+	switch (hdr.flags & VFIO_NESTING_OP_MASK) {
+	case VFIO_IOMMU_NESTING_OP_BIND_PGTBL:
+	case VFIO_IOMMU_NESTING_OP_UNBIND_PGTBL:
+		data_size = sizeof(struct iommu_gpasid_bind_data);
+		break;
+	default:
+		data_size = 0;
+	}
+
+	if ((hdr.argsz - minsz) > data_size) {
+		/* User data > current kernel */
+		return -E2BIG;
+	}
+
+	data = kzalloc(data_size, GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+
+	if (copy_from_user(data, (void __user *)(arg + minsz),
+			   hdr.argsz - minsz)) {
+		ret = -EFAULT;
+		goto out_free;
+	}
+
+	switch (hdr.flags & VFIO_NESTING_OP_MASK) {
+	case VFIO_IOMMU_NESTING_OP_BIND_PGTBL:
+	{
+		struct iommu_gpasid_bind_data *bind_data =
+				(struct iommu_gpasid_bind_data *) data;
+
+		ret = vfio_iommu_pgtbl_op(iommu, true, bind_data);
+		break;
+	}
+	case VFIO_IOMMU_NESTING_OP_UNBIND_PGTBL:
+	{
+		struct iommu_gpasid_bind_data *bind_data =
+				(struct iommu_gpasid_bind_data *) data;
+
+		ret = vfio_iommu_pgtbl_op(iommu, false, bind_data);
+		break;
+	}
+	default:
+		ret = -EINVAL;
+	}
+
+out_free:
+	kfree(data);
+	return ret;
+}
+
 static long vfio_iommu_type1_ioctl(void *iommu_data,
 				   unsigned int cmd, unsigned long arg)
 {
@@ -2469,6 +2664,8 @@ static long vfio_iommu_type1_ioctl(void *iommu_data,
 		return vfio_iommu_type1_unmap_dma(iommu, arg);
 	case VFIO_IOMMU_PASID_REQUEST:
 		return vfio_iommu_type1_pasid_request(iommu, arg);
+	case VFIO_IOMMU_NESTING_OP:
+		return vfio_iommu_type1_nesting_op(iommu, arg);
 	}
 
 	return -ENOTTY;
