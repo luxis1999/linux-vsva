@@ -187,6 +187,7 @@ static void intel_invalidate_range(struct mmu_notifier *mn,
 {
 	struct intel_svm *svm = container_of(mn, struct intel_svm, notifier);
 
+	trace_printk("%s: %lx : %lx\n", __func__, start, end);
 	intel_flush_svm_range(svm, start,
 			      (end - start + PAGE_SIZE - 1) >> VTD_PAGE_SHIFT, 0);
 }
@@ -208,10 +209,11 @@ static void intel_mm_release(struct mmu_notifier *mn, struct mm_struct *mm)
 	 * page) so that we end up taking a fault that the hardware really
 	 * *has* to handle gracefully without affecting other processes.
 	 */
+	trace_printk("%s: \n", __func__);
 	rcu_read_lock();
 	list_for_each_entry_rcu(sdev, &svm->devs, list) {
 		intel_pasid_tear_down_entry(svm->iommu, sdev->dev, svm->pasid);
-		intel_svm_drain_prq(sdev->dev, svm->pasid);
+//		intel_svm_drain_prq(sdev->dev, svm->pasid);
 	}
 	rcu_read_unlock();
 
