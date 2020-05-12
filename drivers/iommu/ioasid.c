@@ -624,6 +624,42 @@ done_unlock:
 EXPORT_SYMBOL_GPL(ioasid_adjust_set);
 
 /**
+ * ioasid_set_for_each_ioasid - Iterate over all the IOASIDs within the set
+ *
+ * Caller must hold a reference of the set and handles its own locking.
+ */
+
+int ioasid_set_for_each_ioasid(int sid, void (*fn)(ioasid_t id, void *data),
+			       void *data)
+{
+	struct ioasid_set_data *sdata;
+	struct ioasid_data *entry;
+	unsigned long index;
+	int ret = 0;
+
+	sdata = xa_load(&ioasid_sets, sid);
+
+	if (!sdata) {
+		pr_err("No IOASID set %d\n", sid);
+		return -EEXIST;
+	}
+
+	if (xa_empty(&sdata->xa)) {
+		pr_warn("No IOASIDs in the set %d\n", sdata->sid);
+		return -ENOENT;
+	}
+
+	xa_for_each(&sdata->xa, index, entry) {
+		pr_debug("%s: Iterate IOASID %lu in the set %d\n", __func__,
+			index, sdata->sid);
+		fn(index, data);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ioasid_set_for_each_ioasid);
+
+/**
  * ioasid_find - Find IOASID data
  * @sid: the IOASID set ID
  * @ioasid: the IOASID to find
