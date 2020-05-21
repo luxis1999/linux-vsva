@@ -1955,12 +1955,12 @@ int iommu_sva_bind_gpasid(struct iommu_domain *domain,
 EXPORT_SYMBOL_GPL(iommu_sva_bind_gpasid);
 
 int iommu_sva_unbind_gpasid(struct iommu_domain *domain, struct device *dev,
-			     ioasid_t pasid)
+			    struct iommu_gpasid_unbind_data *data)
 {
 	if (unlikely(!domain->ops->sva_unbind_gpasid))
 		return -ENODEV;
 
-	return domain->ops->sva_unbind_gpasid(dev, pasid);
+	return domain->ops->sva_unbind_gpasid(domain, dev, data);
 }
 EXPORT_SYMBOL_GPL(iommu_sva_unbind_gpasid);
 
