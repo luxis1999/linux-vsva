@@ -239,6 +239,42 @@ group and can access them as follows::
 	/* Gratuitous device reset and go... */
 	ioctl(device, VFIO_DEVICE_RESET);
 
+Shared Virtual Addressing
+----------------------------------
+
+Shared Virtual Addressing (SVA) gives the capability to share address space
+between device and CPU for memory access, which simplifies the programming
+of device applications. When comes to the virtualization environment, VMs
+with assigned devices can also use it if IOMMU hardware supports two stages
+levels of translation (also known as nested translation). Such translation
+mode lets guest OS own stage-1 (GIOVA -> GPA or GVA->GPA), while hypervisor
+uses stage-2 for VM isolation (GPA -> HPA). Stage corresponds to the ARM
+terminology while level corresponds to Intel's terminology. In the following
+text, we use either without distinction.
+
+For devices that support SVA, VFIO userspace should associate it with a SVA,
+FD (by openning /dev/usva), which provides the uAPIs for vSVA configuration.
+As a prerequisite, VFIO userspace should set its iommu type as nesting type.
+Assuming the HW supports it, this nested mode is selected by choosing the
+VFIO_TYPE1_NESTING_IOMMU type through:
+
+    ioctl(container->fd, VFIO_SET_IOMMU, VFIO_TYPE1_NESTING_IOMMU);
+
+This forces the hypervisor to use the stage-2, leaving stage-1 available
+for guest usage.
+
+After that, uerspace could associate its device with a SVA FD by:
+
+    ioctl(vfio_device->fd, VFIO_DEVICE_SET_SVA, &usva_fd);
+
+After this association, userspace could check the details of stage-1 from
+hardware IOMMU (e.g. bind guest page table or PASID table, PASID width in
+bits, VA width, etc.). Userspace could get such info by:
+
+    ioctl(usva_fd, IOMMU_USVA_GET_INFO, &usva_info);
+
+For more details refer to include/uapi/linux/iommu.h.
+
 VFIO User API
 -------------------------------------------------------------------------------
 
