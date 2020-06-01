@@ -332,6 +332,19 @@ struct iommu_gpasid_bind_data {
 	};
 };
 
+/**
+ * struct iommu_gpasid_unbind_data - Information about device and guest PASID
+ *				     unbinding
+ * @argsz:	User filled size of this data
+ * @flags:	Additional information on guest unbind request
+ * @pasid:	Process address space ID used for the guest mm in host IOMMU
+ */
+struct iommu_gpasid_unbind_data {
+	__u32 argsz;
+	__u64 flags;
+	__u64 pasid;
+};
+
 struct iommu_nesting_info {
 	__u32	size;
 	__u32	format;
