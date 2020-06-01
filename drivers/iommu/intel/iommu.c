@@ -1793,6 +1793,7 @@ static struct dmar_domain *alloc_domain(int flags)
 	if (first_level_by_default())
 		domain->flags |= DOMAIN_FLAG_USE_FIRST_LEVEL;
 	domain->has_iotlb_device = false;
+	domain->ioasid_sid = INVALID_IOASID_SET;
 	INIT_LIST_HEAD(&domain->devices);
 
 	return domain;
@@ -6038,6 +6039,21 @@ intel_iommu_domain_set_attr(struct iommu_domain *domain,
 			ret = -ENODEV;
 		}
 		spin_unlock_irqrestore(&device_domain_lock, flags);
+		break;
+	case DOMAIN_ATTR_IOASID_SID:
+		if (!(dmar_domain->flags & DOMAIN_FLAG_NESTING_MODE)) {
+			ret = -ENODEV;
+			break;
+		}
+		if ((dmar_domain->ioasid_sid != INVALID_IOASID_SET) &&
+		    (dmar_domain->ioasid_sid != (*(int *) data))) {
+			pr_warn_ratelimited("multi ioasid_set (%d:%d) setting",
+					    dmar_domain->ioasid_sid,
+					    (*(int *) data));
+			ret = -EBUSY;
+			break;
+		}
+		dmar_domain->ioasid_sid = *(int *) data;
 		break;
 	default:
 		ret = -EINVAL;
