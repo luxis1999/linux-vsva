@@ -5433,6 +5433,7 @@ intel_iommu_sva_invalidate(struct iommu_domain *domain, struct device *dev,
 		int granu = 0;
 		u64 pasid = 0;
 		u64 addr = 0;
+		void *pdata;
 
 		granu = to_vtd_granularity(cache_type, inv_info->granularity);
 		if (granu == -EINVAL) {
@@ -5451,6 +5452,15 @@ intel_iommu_sva_invalidate(struct iommu_domain *domain, struct device *dev,
 		else if (inv_info->granularity == IOMMU_INV_GRANU_ADDR &&
 			 (inv_info->addr_info.flags & IOMMU_INV_ADDR_FLAGS_PASID))
 			pasid = inv_info->addr_info.pasid;
+
+		pdata = ioasid_find(dmar_domain->ioasid_sid, pasid, NULL);
+		if (!pdata) {
+			ret = -EINVAL;
+			goto out_unlock;
+		} else if (IS_ERR(pdata)) {
+			ret = PTR_ERR(pdata);
+			goto out_unlock;
+		}
 
 		switch (BIT(cache_type)) {
 		case IOMMU_CACHE_INV_TYPE_IOTLB:
