@@ -235,13 +235,25 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 	struct dmar_domain *dmar_domain;
 	struct intel_svm_dev *sdev;
 	struct intel_svm *svm;
+	unsigned long minsz;
 	int ret = 0;
 
 	if (WARN_ON(!iommu) || !data)
 		return -EINVAL;
 
+	/*
+	 * We mandate that no size change in IOMMU UAPI data before the
+	 * variable size union at the end.
+	 */
+	minsz = offsetofend(struct iommu_gpasid_bind_data, padding);
+	if (data->argsz < minsz)
+		return -EINVAL;
+
 	if (data->version != IOMMU_GPASID_BIND_VERSION_1 ||
 	    data->format != IOMMU_PASID_FORMAT_INTEL_VTD)
+		return -EINVAL;
+
+	if (data->argsz != offsetofend(struct iommu_gpasid_bind_data, vtd))
 		return -EINVAL;
 
 	if (!dev_is_pci(dev))

@@ -5365,6 +5365,7 @@ intel_iommu_sva_invalidate(struct iommu_domain *domain, struct device *dev,
 	struct device_domain_info *info;
 	struct intel_iommu *iommu;
 	unsigned long flags;
+	unsigned long minsz;
 	int cache_type;
 	u8 bus, devfn;
 	u16 did, sid;
@@ -5383,6 +5384,21 @@ intel_iommu_sva_invalidate(struct iommu_domain *domain, struct device *dev,
 		return -ENODEV;
 
 	if (!(dmar_domain->flags & DOMAIN_FLAG_NESTING_MODE))
+		return -EINVAL;
+
+	minsz = offsetofend(struct iommu_cache_invalidate_info, padding);
+	if (inv_info->argsz < minsz)
+		return -EINVAL;
+
+	/* Sanity check user filled invalidation dat sizes */
+	if (inv_info->granularity == IOMMU_INV_GRANU_ADDR &&
+		inv_info->argsz != offsetofend(struct iommu_cache_invalidate_info,
+					addr_info))
+		return -EINVAL;
+
+	if (inv_info->granularity == IOMMU_INV_GRANU_PASID &&
+		inv_info->argsz != offsetofend(struct iommu_cache_invalidate_info,
+					pasid_info))
 		return -EINVAL;
 
 	spin_lock_irqsave(&device_domain_lock, flags);
