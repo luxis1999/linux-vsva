@@ -36,6 +36,21 @@ void mdev_set_iommu_domain(struct device *dev, void *domain);
 
 void *mdev_get_iommu_domain(struct device *dev);
 
+/*
+ * Called by the parent device driver to set the iommu fault data which
+ * is used for iommu fault reporting on the mdev. The vfio iommu modules
+ * could call mdev_get_iommu_fault_data() to retrieve fault data and add
+ * it to physical device's fault data list.
+ *
+ * @dev: the mediated device that iommu will report fault.
+ * @fault_data: the iommu fault data for @dev.
+ *
+ * Return 0 for success, otherwise negative error value.
+ */
+void mdev_set_iommu_fault_data(struct device *dev, void *fault_data);
+
+void *mdev_get_iommu_fault_data(struct device *dev);
+
 /**
  * struct mdev_parent_ops - Structure to be registered for each parent device to
  * register the device to mdev module.

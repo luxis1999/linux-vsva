@@ -33,6 +33,7 @@ struct mdev_device {
 	struct kobject *type_kobj;
 	struct device *iommu_device;
 	void *iommu_domain;
+	void *iommu_fault_data;
 	bool active;
 };
 

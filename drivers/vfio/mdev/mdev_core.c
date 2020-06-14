@@ -420,6 +420,22 @@ void *mdev_get_iommu_domain(struct device *dev)
 }
 EXPORT_SYMBOL(mdev_get_iommu_domain);
 
+void mdev_set_iommu_fault_data(struct device *dev, void *fault_data)
+{
+	struct mdev_device *mdev = to_mdev_device(dev);
+
+	mdev->iommu_fault_data = fault_data;
+}
+EXPORT_SYMBOL(mdev_set_iommu_fault_data);
+
+void *mdev_get_iommu_fault_data(struct device *dev)
+{
+	struct mdev_device *mdev = to_mdev_device(dev);
+
+	return mdev->iommu_fault_data;
+}
+EXPORT_SYMBOL(mdev_get_iommu_fault_data);
+
 static int __init mdev_init(void)
 {
 	return mdev_bus_register();
