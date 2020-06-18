@@ -2010,19 +2010,15 @@ int iommu_cache_invalidate(struct iommu_domain *domain, struct device *dev,
 }
 EXPORT_SYMBOL_GPL(iommu_cache_invalidate);
 
-int iommu_sva_bind_gpasid(struct iommu_domain *domain, struct device *dev,
-						void __user *udata)
+
+static int iommu_sva_prepare_bind_data(void __user *udata, bool bind,
+				       struct iommu_gpasid_bind_data *data)
 {
-
-	struct iommu_gpasid_bind_data data;
 	unsigned long minsz, maxsz;
-
-	if (unlikely(!domain->ops->sva_bind_gpasid))
-		return -ENODEV;
 
 	/* Current kernel data size is the max to be copied from user */
 	maxsz = sizeof(struct iommu_gpasid_bind_data);
-	memset((void *)&data, 0, maxsz);
+	memset((void *)data, 0, maxsz);
 
 	/*
 	 * No new spaces can be added before the variable sized union, the
@@ -2031,11 +2027,11 @@ int iommu_sva_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 	minsz = offsetof(struct iommu_gpasid_bind_data, vendor);
 
 	/* Copy minsz from user to get flags and argsz */
-	if (copy_from_user(&data, udata, minsz))
+	if (copy_from_user(data, udata, minsz))
 		return -EFAULT;
 
 	/* Fields before variable size union is mandatory */
-	if (data.argsz < minsz)
+	if (data->argsz < minsz)
 		return -EINVAL;
 	/*
 	 * User might be using a newer UAPI header, we shall let IOMMU vendor
@@ -2043,26 +2039,66 @@ int iommu_sva_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 	 * can be vendor specific, larger argsz could be the result of extension
 	 * for one vendor but it should not affect another vendor.
 	 */
-	if (data.argsz > maxsz)
-		data.argsz = maxsz;
+	if (data->argsz > maxsz)
+		data->argsz = maxsz;
+
+	/*
+	 * For unbind, we don't need any extra data, host PASID is included in
+	 * the minsz and that is all we need.
+	 */
+	if (!bind)
+		return 0;
 
 	/* Copy the remaining user data _after_ minsz */
-	if (copy_from_user((void *)&data + minsz, udata + minsz,
-				data.argsz - minsz))
+	if (copy_from_user((void *)data + minsz, udata + minsz,
+				data->argsz - minsz))
 		return -EFAULT;
 
+	return 0;
+}
+
+int iommu_sva_bind_gpasid(struct iommu_domain *domain, struct device *dev,
+						void __user *udata)
+{
+
+	struct iommu_gpasid_bind_data data;
+	int ret;
+
+	if (unlikely(!domain->ops->sva_bind_gpasid))
+		return -ENODEV;
+
+	ret = iommu_sva_prepare_bind_data(udata, true, &data);
+	if (ret)
+		return ret;
 
 	return domain->ops->sva_bind_gpasid(domain, dev, &data);
 }
 EXPORT_SYMBOL_GPL(iommu_sva_bind_gpasid);
 
-int iommu_sva_unbind_gpasid(struct iommu_domain *domain, struct device *dev,
-			     ioasid_t pasid)
+int __iommu_sva_unbind_gpasid(struct iommu_domain *domain, struct device *dev,
+			struct iommu_gpasid_bind_data *data)
 {
 	if (unlikely(!domain->ops->sva_unbind_gpasid))
 		return -ENODEV;
 
-	return domain->ops->sva_unbind_gpasid(dev, pasid);
+	return domain->ops->sva_unbind_gpasid(dev, data->hpasid);
+}
+EXPORT_SYMBOL_GPL(__iommu_sva_unbind_gpasid);
+
+int iommu_sva_unbind_gpasid(struct iommu_domain *domain, struct device *dev,
+			void __user *udata)
+{
+	struct iommu_gpasid_bind_data data;
+	int ret;
+
+	if (unlikely(!domain->ops->sva_bind_gpasid))
+		return -ENODEV;
+
+	ret = iommu_sva_prepare_bind_data(udata, false, &data);
+	if (ret)
+		return ret;
+
+	return __iommu_sva_unbind_gpasid(domain, dev, &data);
 }
 EXPORT_SYMBOL_GPL(iommu_sva_unbind_gpasid);
 
