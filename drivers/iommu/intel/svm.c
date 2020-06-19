@@ -436,24 +436,19 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 	return ret;
 }
 
-int intel_svm_unbind_gpasid(struct iommu_domain *domain,
-			    struct device *dev,
-			    struct iommu_gpasid_bind_data *data)
+int intel_svm_unbind_pasid(struct iommu_domain *domain,
+			   struct device *dev,
+			   ioasid_t pasid)
 {
 	struct intel_iommu *iommu = intel_svm_device_to_iommu(dev);
 	struct dmar_domain *dmar_domain;
 	struct intel_svm_dev *sdev;
 	struct intel_svm *svm;
 	int ret = -EINVAL;
-	ioasid_t pasid;
-
-	if (!data || data->flags & ~IOMMU_SVA_GPASID_VAL)
-		return -EINVAL;
 
 	if (WARN_ON(!iommu))
 		return -EINVAL;
 
-	pasid = data->hpasid;
 	dmar_domain = to_dmar_domain(domain);
 
 	mutex_lock(&pasid_mutex);
@@ -499,6 +494,20 @@ int intel_svm_unbind_gpasid(struct iommu_domain *domain,
 out:
 	mutex_unlock(&pasid_mutex);
 	return ret;
+}
+
+int intel_svm_unbind_gpasid(struct iommu_domain *domain,
+			    struct device *dev,
+			    struct iommu_gpasid_bind_data *data)
+{
+	ioasid_t pasid;
+
+	if (!data || data->flags & ~IOMMU_SVA_GPASID_VAL)
+		return -EINVAL;
+
+	pasid = data->hpasid;
+
+	return intel_svm_unbind_pasid(domain, dev, pasid);
 }
 
 /* Caller must hold pasid_mutex, mm reference */

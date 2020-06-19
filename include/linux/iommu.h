@@ -230,6 +230,7 @@ struct iommu_iotlb_gather {
  * @cache_invalidate: invalidate translation caches
  * @sva_bind_gpasid: bind guest pasid and mm
  * @sva_unbind_gpasid: unbind guest pasid and mm
+ * @sva_unbind_pasid: unbind a host pasid with guest mm
  * @def_domain_type: device default domain type, return value:
  *		- IOMMU_DOMAIN_IDENTITY: must use an identity domain
  *		- IOMMU_DOMAIN_DMA: must use a dma domain
@@ -304,6 +305,8 @@ struct iommu_ops {
 			struct device *dev, struct iommu_gpasid_bind_data *data);
 	int (*sva_unbind_gpasid)(struct iommu_domain *domain,
 			struct device *dev, struct iommu_gpasid_bind_data *data);
+	int (*sva_unbind_pasid)(struct iommu_domain *domain,
+				struct device *dev, ioasid_t pasid);
 
 	int (*def_domain_type)(struct device *dev);
 
@@ -439,6 +442,8 @@ extern int iommu_sva_bind_gpasid(struct iommu_domain *domain,
 				struct device *dev, void __user *udata);
 extern int iommu_sva_unbind_gpasid(struct iommu_domain *domain,
 				struct device *dev, void __user *udata);
+extern int iommu_sva_unbind_pasid(struct iommu_domain *domain,
+				struct device *dev, ioasid_t pasid);
 extern struct iommu_domain *iommu_get_domain_for_dev(struct device *dev);
 extern struct iommu_domain *iommu_get_dma_domain(struct device *dev);
 extern int iommu_map(struct iommu_domain *domain, unsigned long iova,
@@ -1071,6 +1076,12 @@ static inline int iommu_sva_bind_gpasid(struct iommu_domain *domain,
 
 static inline int iommu_sva_unbind_gpasid(struct iommu_domain *domain,
 				struct device *dev, void __user *udata)
+{
+	return -ENODEV;
+}
+
+static int iommu_sva_unbind_pasid(struct iommu_domain *domain,
+				struct device *dev, ioasid_t pasid)
 {
 	return -ENODEV;
 }
