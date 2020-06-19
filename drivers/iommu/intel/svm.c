@@ -370,15 +370,23 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 	return ret;
 }
 
-int intel_svm_unbind_gpasid(struct device *dev, int pasid)
+int intel_svm_unbind_gpasid(struct iommu_domain *domain,
+			    struct device *dev,
+			    struct iommu_gpasid_bind_data *data)
 {
 	struct intel_iommu *iommu = intel_svm_device_to_iommu(dev);
 	struct intel_svm_dev *sdev;
 	struct intel_svm *svm;
 	int ret = -EINVAL;
+	ioasid_t pasid;
+
+	if (!data || data->flags & ~IOMMU_SVA_GPASID_VAL)
+		return -EINVAL;
 
 	if (WARN_ON(!iommu))
 		return -EINVAL;
+
+	pasid = data->hpasid;
 
 	mutex_lock(&pasid_mutex);
 	svm = ioasid_find(NULL, pasid, NULL);

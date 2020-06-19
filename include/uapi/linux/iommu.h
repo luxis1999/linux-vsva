@@ -295,7 +295,8 @@ struct iommu_gpasid_bind_data_vtd {
 					 IOMMU_SVA_VTD_GPASID_PWT)
 
 /**
- * struct iommu_gpasid_bind_data - Information about device and guest PASID binding
+ * struct iommu_gpasid_bind_data - Information about device and guest PASID
+ *				   binding and unbinding.
  * @argsz:	User filled size of this data
  * @version:	Version of this data structure
  * @format:	PASID table entry format
@@ -312,6 +313,10 @@ struct iommu_gpasid_bind_data_vtd {
  * is needed when VM programs guest PASID into an assigned device. VMM may
  * trap such PASID programming then request host IOMMU driver to convert guest
  * PASID to host PASID based on this bind data.
+ *
+ * When used for unbinding, the @argsz, @flags and @hpasid are used, kernel
+ * will ingore other fields.
+ *
  */
 struct iommu_gpasid_bind_data {
 	__u32 argsz;
