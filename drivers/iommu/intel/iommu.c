@@ -5480,8 +5480,7 @@ intel_iommu_sva_invalidate(struct iommu_domain *domain, struct device *dev,
 			if (info->ats_enabled)
 				qi_flush_dev_iotlb_pasid(iommu, sid,
 						info->pfsid, pasid,
-						info->ats_qdep,
-						inv_info->granu.addr_info.addr,
+						info->ats_qdep,	addr,
 						size);
 			else
 				pr_warn_ratelimited("Passdown device IOTLB flush w/o ATS!\n");
