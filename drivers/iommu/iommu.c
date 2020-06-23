@@ -2043,8 +2043,8 @@ static int iommu_sva_prepare_bind_data(void __user *udata, bool bind,
 		data->argsz = maxsz;
 
 	/*
-	 * For unbind, we don't need any extra data, host PASID is included in
-	 * the minsz and that is all we need.
+	 * For unbind, we don't need any extra data, host PASID and flags are
+	 * included in the minsz and that is all we need.
 	 */
 	if (!bind)
 		return 0;
@@ -2081,7 +2081,7 @@ int __iommu_sva_unbind_gpasid(struct iommu_domain *domain, struct device *dev,
 	if (unlikely(!domain->ops->sva_unbind_gpasid))
 		return -ENODEV;
 
-	return domain->ops->sva_unbind_gpasid(dev, data->hpasid);
+	return domain->ops->sva_unbind_gpasid(dev, data->hpasid, data->flags);
 }
 EXPORT_SYMBOL_GPL(__iommu_sva_unbind_gpasid);
 
