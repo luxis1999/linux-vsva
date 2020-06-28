@@ -6179,9 +6179,14 @@ static int intel_iommu_get_nesting_info(struct iommu_domain *domain,
 
 	info->addr_width = dmar_domain->gaw;
 	info->format = IOMMU_PASID_FORMAT_INTEL_VTD;
+	/* REVISIT:
+	 * to be precise, may only report SYSWIDE_PASID when pasid is
+	 * supported, also may only report page_resp when PRS is supported
+	 */
 	info->features = IOMMU_NESTING_FEAT_SYSWIDE_PASID |
 			 IOMMU_NESTING_FEAT_BIND_PGTBL |
-			 IOMMU_NESTING_FEAT_CACHE_INVLD;
+			 IOMMU_NESTING_FEAT_CACHE_INVLD |
+			 IOMMU_NESTING_FEAT_PAGE_RESP;
 	info->pasid_bits = ilog2(intel_pasid_max_id);
 	memset(&info->padding, 0x0, 12);
 

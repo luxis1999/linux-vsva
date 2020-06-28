@@ -389,6 +389,9 @@ struct iommu_nesting_info_vtd {
  * |               |  UAPI according to vendor-specific requirement when  |
  * |               |  changing the 1st level/stage page table.            |
  * +---------------+------------------------------------------------------+
+ * | PAGE_RESP     |  IOMMU vendor driver sets it to mandate userspace to |
+ * |               |  respone any page request reported by kernel space   |
+ * +---------------+------------------------------------------------------+
  *
  * data struct types defined for @format:
  * +================================+=====================================+
@@ -405,6 +408,7 @@ struct iommu_nesting_info {
 #define IOMMU_NESTING_FEAT_SYSWIDE_PASID	(1 << 0)
 #define IOMMU_NESTING_FEAT_BIND_PGTBL		(1 << 1)
 #define IOMMU_NESTING_FEAT_CACHE_INVLD		(1 << 2)
+#define IOMMU_NESTING_FEAT_PAGE_RESP		(1 << 3)
 	__u32	features;
 	__u16	addr_width;
 	__u16	pasid_bits;
