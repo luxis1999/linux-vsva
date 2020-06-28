@@ -2434,8 +2434,15 @@ static int iommu_sva_prepare_bind_data(void __user *udata,
 	return iommu_check_bind_data(data);
 }
 
+
+/*
+ * Caller could provide fault_data to differentiate future page
+ * requests from the device. This is helpful for page request
+ * handling for partial assignments of physical devices. e.g.
+ * mediated device assingment or other sub-device solution.
+ */
 int iommu_uapi_sva_bind_gpasid(struct iommu_domain *domain, struct device *dev,
-			       void __user *udata)
+			       void __user *udata, void *fault_data)
 {
 	struct iommu_gpasid_bind_data data = { 0 };
 	int ret;
@@ -2447,7 +2454,7 @@ int iommu_uapi_sva_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 	if (ret)
 		return ret;
 
-	return domain->ops->sva_bind_gpasid(domain, dev, &data);
+	return domain->ops->sva_bind_gpasid(domain, dev, &data, fault_data);
 }
 EXPORT_SYMBOL_GPL(iommu_uapi_sva_bind_gpasid);
 
