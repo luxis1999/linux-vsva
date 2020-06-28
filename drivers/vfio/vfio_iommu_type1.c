@@ -1761,6 +1761,22 @@ static struct iommu_domain *vfio_mdev_get_domain(struct device *dev)
 	return NULL;
 }
 
+static void *vfio_mdev_get_iommu_fault_data(struct device *dev)
+{
+	void *(*fn)(struct device *dev);
+	void *iommu_fault_data;
+
+	fn = symbol_get(mdev_get_iommu_fault_data);
+	if (fn) {
+		iommu_fault_data = fn(dev);
+		symbol_put(mdev_get_iommu_fault_data);
+
+		return iommu_fault_data;
+	}
+
+	return NULL;
+}
+
 static int vfio_mdev_attach_domain(struct device *dev, void *data)
 {
 	struct iommu_domain *domain;
@@ -2519,13 +2535,18 @@ static int vfio_dev_bind_gpasid_fn(struct device *dev, void *data)
 	struct domain_capsule *dc = (struct domain_capsule *)data;
 	unsigned long arg = *(unsigned long *)dc->data;
 	struct device *iommu_device;
+	void *iommu_fault_data = NULL;
 
 	iommu_device = vfio_get_iommu_device(dc->group, dev);
 	if (!iommu_device)
 		return -EINVAL;
 
+	if (iommu_device != dev)
+		iommu_fault_data = vfio_mdev_get_iommu_fault_data(dev);
+
 	return iommu_uapi_sva_bind_gpasid(dc->domain, iommu_device,
-					  (void __user *)arg);
+					  (void __user *)arg,
+					  iommu_fault_data);
 }
 
 static int vfio_dev_unbind_gpasid_fn(struct device *dev, void *data)
