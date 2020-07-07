@@ -5430,6 +5430,7 @@ intel_iommu_sva_invalidate(struct iommu_domain *domain, struct device *dev,
 		if (granu == -EINVAL) {
 			pr_err_ratelimited("Invalid cache type and granu combination %d/%d\n",
 					   cache_type, inv_info->granularity);
+			ret = -EINVAL;
 			break;
 		}
 
