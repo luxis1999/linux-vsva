@@ -37,6 +37,7 @@ available subsections can be seen below.
    pci/index
    spi
    i2c
+   ioasid
    ipmb
    ipmi
    i3c/index
