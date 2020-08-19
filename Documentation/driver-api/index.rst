@@ -38,6 +38,7 @@ available subsections can be seen below.
    cxl/index
    spi
    i2c
+   ioasid
    ipmb
    ipmi
    i3c/index
