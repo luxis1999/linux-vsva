@@ -16,8 +16,26 @@ static ioasid_t ioasid_capacity = PCI_PASID_MAX;
 static ioasid_t ioasid_capacity_avail = PCI_PASID_MAX;
 static DEFINE_XARRAY_ALLOC(ioasid_sets);
 
+enum ioasid_state {
+	IOASID_STATE_INACTIVE,
+	IOASID_STATE_ACTIVE,
+	IOASID_STATE_FREE_PENDING,
+};
+
+/**
+ * struct ioasid_data - Meta data about ioasid
+ *
+ * @id:		Unique ID
+ * @users:	Number of active users
+ * @state:	Track state of the IOASID
+ * @set:	ioasid_set of the IOASID belongs to
+ * @private:	Private data associated with the IOASID
+ * @rcu:	For free after RCU grace period
+ */
 struct ioasid_data {
 	ioasid_t id;
+	refcount_t users;
+	enum ioasid_state state;
 	struct ioasid_set *set;
 	void *private;
 	struct rcu_head rcu;
@@ -511,6 +529,8 @@ ioasid_t ioasid_alloc(struct ioasid_set *set, ioasid_t min, ioasid_t max,
 		goto exit_free;
 	}
 	data->id = id;
+	data->state = IOASID_STATE_ACTIVE;
+	refcount_set(&data->users, 1);
 
 	/* Store IOASID in the per set data */
 	if (xa_err(xa_store(&set->xa, id, data, GFP_ATOMIC))) {
@@ -558,6 +578,14 @@ static void ioasid_free_locked(struct ioasid_set *set, ioasid_t ioasid)
 	}
 	/* Check if the set exists */
 	if (WARN_ON(!xa_load(&ioasid_sets, data->set->id)))
+		return;
+
+	/* Free is already in progress */
+	if (data->state == IOASID_STATE_FREE_PENDING)
+		return;
+
+	data->state = IOASID_STATE_FREE_PENDING;
+	if (!refcount_dec_and_test(&data->users))
 		return;
 
 	ioasid_do_free_locked(data);
@@ -716,6 +744,95 @@ void ioasid_set_for_each_ioasid(struct ioasid_set *set,
 		fn(index, data);
 }
 EXPORT_SYMBOL_GPL(ioasid_set_for_each_ioasid);
+
+int ioasid_get_locked(struct ioasid_set *set, ioasid_t ioasid)
+{
+	struct ioasid_data *data;
+
+	data = xa_load(&active_allocator->xa, ioasid);
+	if (!data) {
+		pr_err("Trying to get unknown IOASID %u\n", ioasid);
+		return -EINVAL;
+	}
+	if (data->state == IOASID_STATE_FREE_PENDING) {
+		pr_err("Trying to get IOASID being freed%u\n", ioasid);
+		return -EBUSY;
+	}
+
+	/* Check set ownership if the set is non-null */
+	if (set && data->set != set) {
+		pr_err("Trying to get IOASID %u outside the set\n", ioasid);
+		/* data found but does not belong to the set */
+		return -EACCES;
+	}
+	refcount_inc(&data->users);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(ioasid_get_locked);
+
+/**
+ * ioasid_get - Obtain a reference to an ioasid
+ * @set:	the ioasid_set to check permission against if not NULL
+ * @ioasid:	the ID to remove
+ *
+ *
+ * Return: 0 on success, error if failed.
+ */
+int ioasid_get(struct ioasid_set *set, ioasid_t ioasid)
+{
+	int ret;
+
+	spin_lock(&ioasid_allocator_lock);
+	ret = ioasid_get_locked(set, ioasid);
+	spin_unlock(&ioasid_allocator_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ioasid_get);
+
+bool ioasid_put_locked(struct ioasid_set *set, ioasid_t ioasid)
+{
+	struct ioasid_data *data;
+
+	data = xa_load(&active_allocator->xa, ioasid);
+	if (!data) {
+		pr_err("Trying to put unknown IOASID %u\n", ioasid);
+		return false;
+	}
+	if (set && data->set != set) {
+		pr_err("Trying to drop IOASID %u outside the set\n", ioasid);
+		return false;
+	}
+	if (!refcount_dec_and_test(&data->users))
+		return false;
+
+	ioasid_do_free_locked(data);
+
+	return true;
+}
+EXPORT_SYMBOL_GPL(ioasid_put_locked);
+
+/**
+ * ioasid_put - Release a reference to an ioasid
+ * @set:	the ioasid_set to check permission against if not NULL
+ * @ioasid:	the ID to remove
+ *
+ * Put a reference to the IOASID, free it when the number of references drops to
+ * zero.
+ *
+ * Return: %true if the IOASID was freed, %false otherwise.
+ */
+bool ioasid_put(struct ioasid_set *set, ioasid_t ioasid)
+{
+	bool ret;
+
+	spin_lock(&ioasid_allocator_lock);
+	ret = ioasid_put_locked(set, ioasid);
+	spin_unlock(&ioasid_allocator_lock);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ioasid_put);
 
 /**
  * ioasid_find - Find IOASID data

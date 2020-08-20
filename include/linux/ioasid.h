@@ -73,6 +73,10 @@ void *ioasid_find(struct ioasid_set *set, ioasid_t ioasid,
 		  bool (*getter)(void *));
 int ioasid_register_allocator(struct ioasid_allocator_ops *allocator);
 void ioasid_unregister_allocator(struct ioasid_allocator_ops *allocator);
+int ioasid_get(struct ioasid_set *set, ioasid_t ioasid);
+int ioasid_get_locked(struct ioasid_set *set, ioasid_t ioasid);
+bool ioasid_put(struct ioasid_set *set, ioasid_t ioasid);
+bool ioasid_put_locked(struct ioasid_set *set, ioasid_t ioasid);
 int ioasid_attach_data(ioasid_t ioasid, void *data);
 void ioasid_detach_data(ioasid_t ioasid);
 void ioasid_set_for_each_ioasid(struct ioasid_set *sdata,
@@ -110,6 +114,26 @@ static inline int ioasid_adjust_set(struct ioasid_set *set, int quota)
 
 static inline void ioasid_set_put(struct ioasid_set *set)
 {
+}
+
+static inline int ioasid_get(struct ioasid_set *set, ioasid_t ioasid)
+{
+	return -ENOTSUPP;
+}
+
+static inline int ioasid_get_locked(struct ioasid_set *set, ioasid_t ioasid)
+{
+	return -ENOTSUPP;
+}
+
+static inline bool ioasid_put(struct ioasid_set *set, ioasid_t ioasid)
+{
+	return false;
+}
+
+static inline bool ioasid_put_locked(struct ioasid_set *set, ioasid_t ioasid)
+{
+	return false;
 }
 
 static inline void *ioasid_find(struct ioasid_set *set, ioasid_t ioasid, bool (*getter)(void *))
