@@ -98,6 +98,7 @@ static inline bool intel_svm_capable(struct intel_iommu *iommu)
 static inline void intel_svm_drop_pasid(ioasid_t pasid)
 {
 	ioasid_detach_data(pasid);
+	ioasid_detach_spid(pasid);
 	ioasid_put(NULL, pasid);
 }
 
@@ -425,6 +426,7 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 		if (data->flags & IOMMU_SVA_GPASID_VAL) {
 			svm->gpasid = data->gpasid;
 			svm->flags |= SVM_FLAG_GUEST_PASID;
+			ioasid_attach_spid(data->hpasid, data->gpasid);
 		}
 		ioasid_attach_data(data->hpasid, svm);
 		ioasid_get(NULL, svm->pasid);
