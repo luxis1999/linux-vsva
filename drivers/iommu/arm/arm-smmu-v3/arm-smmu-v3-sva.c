@@ -459,6 +459,7 @@ int arm_smmu_master_enable_sva(struct arm_smmu_master *master)
 {
 	mutex_lock(&sva_lock);
 	master->sva_enabled = true;
+	iommu_sva_init();
 	mutex_unlock(&sva_lock);
 
 	return 0;
