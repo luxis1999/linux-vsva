@@ -228,7 +228,9 @@ static LIST_HEAD(global_svm_list);
 	list_for_each_entry((sdev), &(svm)->devs, list)	\
 		if ((d) != (sdev)->dev) {} else
 
-static int pasid_to_svm_sdev(struct device *dev, unsigned int pasid,
+static int pasid_to_svm_sdev(struct device *dev,
+			     struct ioasid_set *set,
+			     unsigned int pasid,
 			     struct intel_svm **rsvm,
 			     struct intel_svm_dev **rsdev)
 {
@@ -242,7 +244,7 @@ static int pasid_to_svm_sdev(struct device *dev, unsigned int pasid,
 	if (pasid == INVALID_IOASID || pasid >= PASID_MAX)
 		return -EINVAL;
 
-	svm = ioasid_find(NULL, pasid, NULL);
+	svm = ioasid_find(set, pasid, NULL);
 	if (IS_ERR(svm))
 		return PTR_ERR(svm);
 
@@ -312,7 +314,8 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 	dmar_domain = to_dmar_domain(domain);
 
 	mutex_lock(&pasid_mutex);
-	ret = pasid_to_svm_sdev(dev, data->hpasid, &svm, &sdev);
+	ret = pasid_to_svm_sdev(dev, NULL,
+				data->hpasid, &svm, &sdev);
 	if (ret)
 		goto out;
 
@@ -417,7 +420,7 @@ int intel_svm_unbind_gpasid(struct device *dev, int pasid)
 		return -EINVAL;
 
 	mutex_lock(&pasid_mutex);
-	ret = pasid_to_svm_sdev(dev, pasid, &svm, &sdev);
+	ret = pasid_to_svm_sdev(dev, NULL, pasid, &svm, &sdev);
 	if (ret)
 		goto out;
 
@@ -555,7 +558,7 @@ intel_svm_bind_mm(struct device *dev, int flags, struct svm_dev_ops *ops,
 			pasid_max = intel_pasid_max_id;
 
 		/* Do not use PASID 0, reserved for RID to PASID */
-		svm->pasid = ioasid_alloc(NULL, PASID_MIN,
+		svm->pasid = ioasid_alloc(host_pasid_set, PASID_MIN,
 					  pasid_max - 1, svm);
 		if (svm->pasid == INVALID_IOASID) {
 			kfree(svm);
@@ -572,7 +575,7 @@ intel_svm_bind_mm(struct device *dev, int flags, struct svm_dev_ops *ops,
 		if (mm) {
 			ret = mmu_notifier_register(&svm->notifier, mm);
 			if (ret) {
-				ioasid_free(svm->pasid);
+				ioasid_free(host_pasid_set, svm->pasid);
 				kfree(svm);
 				kfree(sdev);
 				goto out;
@@ -590,7 +593,7 @@ intel_svm_bind_mm(struct device *dev, int flags, struct svm_dev_ops *ops,
 		if (ret) {
 			if (mm)
 				mmu_notifier_unregister(&svm->notifier, mm);
-			ioasid_free(svm->pasid);
+			ioasid_free(host_pasid_set, svm->pasid);
 			kfree(svm);
 			kfree(sdev);
 			goto out;
@@ -638,7 +641,8 @@ static int intel_svm_unbind_mm(struct device *dev, int pasid)
 	if (!iommu)
 		goto out;
 
-	ret = pasid_to_svm_sdev(dev, pasid, &svm, &sdev);
+	ret = pasid_to_svm_sdev(dev, host_pasid_set,
+				pasid, &svm, &sdev);
 	if (ret)
 		goto out;
 
@@ -659,7 +663,7 @@ static int intel_svm_unbind_mm(struct device *dev, int pasid)
 			kfree_rcu(sdev, rcu);
 
 			if (list_empty(&svm->devs)) {
-				ioasid_free(svm->pasid);
+				ioasid_free(host_pasid_set, svm->pasid);
 				if (svm->mm)
 					mmu_notifier_unregister(&svm->notifier, svm->mm);
 				list_del(&svm->list);
@@ -1130,7 +1134,8 @@ int intel_svm_page_response(struct device *dev,
 		goto out;
 	}
 
-	ret = pasid_to_svm_sdev(dev, prm->pasid, &svm, &sdev);
+	ret = pasid_to_svm_sdev(dev, host_pasid_set,
+				prm->pasid, &svm, &sdev);
 	if (ret || !sdev) {
 		ret = -ENODEV;
 		goto out;
