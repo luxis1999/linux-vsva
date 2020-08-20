@@ -23,6 +23,7 @@ enum ioasid_set_type {
 
 /**
  * struct ioasid_set - Meta data about ioasid_set
+ * @nh:		List of notifiers private to that set
  * @xa:		XArray to store ioasid_set private IDs, can be used for
  *		guest-host IOASID mapping, or just a private IOASID namespace.
  * @token:	Unique to identify an IOASID set
@@ -33,6 +34,7 @@ enum ioasid_set_type {
  * @ref:	Reference count of the users
  */
 struct ioasid_set {
+	struct atomic_notifier_head nh;
 	struct xarray xa;
 	void *token;
 	int type;
@@ -55,6 +57,47 @@ struct ioasid_allocator_ops {
 	ioasid_alloc_fn_t alloc;
 	ioasid_free_fn_t free;
 	struct list_head list;
+	void *pdata;
+};
+
+/* Notification data when IOASID status changed */
+enum ioasid_notify_val {
+	IOASID_NOTIFY_ALLOC = 1,
+	IOASID_NOTIFY_FREE,
+	IOASID_NOTIFY_BIND,
+	IOASID_NOTIFY_UNBIND,
+};
+
+#define IOASID_NOTIFY_FLAG_ALL BIT(0)
+#define IOASID_NOTIFY_FLAG_SET BIT(1)
+/**
+ * enum ioasid_notifier_prios - IOASID event notification order
+ *
+ * When status of an IOASID changes, users might need to take actions to
+ * reflect the new state. For example, when an IOASID is freed due to
+ * exception, the hardware context in virtual CPU, DMA device, and IOMMU
+ * shall be cleared and drained. Order is required to prevent life cycle
+ * problems.
+ */
+enum ioasid_notifier_prios {
+	IOASID_PRIO_LAST,
+	IOASID_PRIO_DEVICE,
+	IOASID_PRIO_IOMMU,
+	IOASID_PRIO_CPU,
+};
+
+/**
+ * struct ioasid_nb_args - Argument provided by IOASID core when notifier
+ * is called.
+ * @id:		The IOASID being notified
+ * @spid:	The set private ID associated with the IOASID
+ * @set:	The IOASID set of @id
+ * @pdata:	The private data attached to the IOASID
+ */
+struct ioasid_nb_args {
+	ioasid_t id;
+	ioasid_t spid;
+	struct ioasid_set *set;
 	void *pdata;
 };
 
@@ -82,7 +125,10 @@ void ioasid_detach_data(ioasid_t ioasid);
 int ioasid_attach_spid(ioasid_t ioasid, ioasid_t spid);
 void ioasid_detach_spid(ioasid_t ioasid);
 ioasid_t ioasid_find_by_spid(struct ioasid_set *set, ioasid_t spid);
-
+int ioasid_register_notifier(struct ioasid_set *set,
+			struct notifier_block *nb);
+void ioasid_unregister_notifier(struct ioasid_set *set,
+				struct notifier_block *nb);
 void ioasid_set_for_each_ioasid(struct ioasid_set *sdata,
 				void (*fn)(ioasid_t id, void *data),
 				void *data);
@@ -143,6 +189,15 @@ static inline bool ioasid_put_locked(struct ioasid_set *set, ioasid_t ioasid)
 static inline void *ioasid_find(struct ioasid_set *set, ioasid_t ioasid, bool (*getter)(void *))
 {
 	return NULL;
+}
+
+static inline int ioasid_register_notifier(struct notifier_block *nb)
+{
+	return -ENOTSUPP;
+}
+
+static inline void ioasid_unregister_notifier(struct notifier_block *nb)
+{
 }
 
 static inline int ioasid_register_allocator(struct ioasid_allocator_ops *allocator)
