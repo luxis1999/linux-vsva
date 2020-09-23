@@ -10,12 +10,32 @@
 #include <linux/spinlock.h>
 #include <linux/xarray.h>
 
+/* Default to PCIe standard 20 bit PASID */
+#define PCI_PASID_MAX 0x100000
+static ioasid_t ioasid_capacity = PCI_PASID_MAX;
+static ioasid_t ioasid_capacity_avail = PCI_PASID_MAX;
 struct ioasid_data {
 	ioasid_t id;
 	struct ioasid_set *set;
 	void *private;
 	struct rcu_head rcu;
 };
+
+void ioasid_install_capacity(ioasid_t total)
+{
+	if (ioasid_capacity && ioasid_capacity != PCI_PASID_MAX) {
+		pr_warn("IOASID capacity is already set.\n");
+		return;
+	}
+	ioasid_capacity = ioasid_capacity_avail = total;
+}
+EXPORT_SYMBOL_GPL(ioasid_install_capacity);
+
+ioasid_t ioasid_get_capacity(void)
+{
+	return ioasid_capacity;
+}
+EXPORT_SYMBOL_GPL(ioasid_get_capacity);
 
 /*
  * struct ioasid_allocator_data - Internal data structure to hold information
