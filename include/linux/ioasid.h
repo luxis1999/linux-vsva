@@ -62,6 +62,7 @@ struct ioasid_allocator_ops {
 void ioasid_install_capacity(ioasid_t total);
 ioasid_t ioasid_get_capacity(void);
 struct ioasid_set *ioasid_set_alloc(void *token, ioasid_t quota, int type);
+int ioasid_adjust_set(struct ioasid_set *set, int quota);
 void ioasid_set_get(struct ioasid_set *set);
 void ioasid_set_put(struct ioasid_set *set);
 
@@ -97,6 +98,11 @@ static inline void ioasid_free(struct ioasid_set *set, ioasid_t ioasid)
 static inline struct ioasid_set *ioasid_set_alloc(void *token, ioasid_t quota, int type)
 {
 	return ERR_PTR(-ENOTSUPP);
+}
+
+static inline int ioasid_adjust_set(struct ioasid_set *set, int quota)
+{
+	return -ENOTSUPP;
 }
 
 static inline void ioasid_set_put(struct ioasid_set *set)

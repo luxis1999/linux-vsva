@@ -654,6 +654,53 @@ void ioasid_set_put(struct ioasid_set *set)
 EXPORT_SYMBOL_GPL(ioasid_set_put);
 
 /**
+ * ioasid_adjust_set - Adjust the quota of an IOASID set
+ * @set:	IOASID set to be assigned
+ * @quota:	Quota allowed in this set
+ *
+ * Return 0 on success. If the new quota is smaller than the number of
+ * IOASIDs already allocated, -EINVAL will be returned. No change will be
+ * made to the existing quota.
+ */
+int ioasid_adjust_set(struct ioasid_set *set, int quota)
+{
+	int ret = 0;
+
+	if (quota <= 0)
+		return -EINVAL;
+
+	spin_lock(&ioasid_allocator_lock);
+	if (set->nr_ioasids > quota) {
+		pr_err("New quota %d is smaller than outstanding IOASIDs %d\n",
+			quota, set->nr_ioasids);
+		ret = -EINVAL;
+		goto done_unlock;
+	}
+
+	if ((quota > set->quota) &&
+		(quota - set->quota > ioasid_capacity_avail)) {
+		ret = -ENOSPC;
+		goto done_unlock;
+	}
+
+	/* Return the delta back to system pool */
+	ioasid_capacity_avail += set->quota - quota;
+
+	/*
+	 * May have a policy to prevent giving all available IOASIDs
+	 * to one set. But we don't enforce here, it should be in the
+	 * upper layers.
+	 */
+	set->quota = quota;
+
+done_unlock:
+	spin_unlock(&ioasid_allocator_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ioasid_adjust_set);
+
+/**
  * ioasid_find - Find IOASID data
  * @set: the IOASID set
  * @ioasid: the IOASID to find
