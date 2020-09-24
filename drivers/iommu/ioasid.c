@@ -889,6 +889,29 @@ void ioasid_set_put(struct ioasid_set *set)
 }
 EXPORT_SYMBOL_GPL(ioasid_set_put);
 
+/*
+ * ioasid_find_mm_set - Retrieve IOASID set with mm token
+ * Take a reference of the set if found.
+ */
+static struct ioasid_set *ioasid_find_mm_set(struct mm_struct *token)
+{
+	struct ioasid_set *set;
+	unsigned long index;
+
+	spin_lock(&ioasid_allocator_lock);
+
+	xa_for_each(&ioasid_sets, index, set) {
+		if (set->type == IOASID_SET_TYPE_MM && set->token == token) {
+			refcount_inc(&set->ref);
+			goto exit_unlock;
+		}
+	}
+	set = NULL;
+exit_unlock:
+	spin_unlock(&ioasid_allocator_lock);
+	return set;
+}
+
 /**
  * ioasid_adjust_set - Adjust the quota of an IOASID set
  * @set:	IOASID set to be assigned
@@ -1120,6 +1143,100 @@ void ioasid_unregister_notifier(struct ioasid_set *set,
 		atomic_notifier_chain_unregister(&ioasid_notifier, nb);
 }
 EXPORT_SYMBOL_GPL(ioasid_unregister_notifier);
+
+/**
+ * ioasid_register_notifier_mm - Register a notifier block on the IOASID set
+ *                               created by the mm_struct pointer as the token
+ *
+ * @mm: the mm_struct token of the ioasid_set
+ * @nb: notfier block to be registered on the ioasid_set
+ *
+ * This a variant of ioasid_register_notifier() where the caller intends to
+ * listen to IOASID events belong the ioasid_set created under the same
+ * process. Caller is not aware of the ioasid_set, no need to hold reference
+ * of the ioasid_set.
+ */
+int ioasid_register_notifier_mm(struct mm_struct *mm, struct notifier_block *nb)
+{
+	struct ioasid_set_nb *curr;
+	struct ioasid_set *set;
+	int ret = 0;
+
+	if (!mm)
+		return -EINVAL;
+
+	spin_lock(&ioasid_nb_lock);
+
+	/* Check for duplicates, nb is unique per set */
+	list_for_each_entry(curr, &ioasid_nb_pending_list, list) {
+		if (curr->token == mm && curr->nb == nb) {
+			ret = -EBUSY;
+			goto exit_unlock;
+		}
+	}
+
+	/* Check if the token has an existing set */
+	set = ioasid_find_mm_set(mm);
+	if (!set) {
+		/* Add to the rsvd list as inactive */
+		curr->active = false;
+	} else {
+		/* REVISIT: Only register empty set for now. Can add an option
+		 * in the future to playback existing PASIDs.
+		 */
+		if (set->nr_ioasids) {
+			pr_warn("IOASID set %d not empty\n", set->id);
+			ret = -EBUSY;
+			goto exit_unlock;
+		}
+		curr = kzalloc(sizeof(*curr), GFP_ATOMIC);
+		if (!curr) {
+			ret = -ENOMEM;
+			goto exit_unlock;
+		}
+		curr->token = mm;
+		curr->nb = nb;
+		curr->active = true;
+		curr->set = set;
+
+		/* Set already created, add to the notifier chain */
+		atomic_notifier_chain_register(&set->nh, nb);
+		/*
+		 * Do not hold a reference, if the set gets destroyed, the nb
+		 * entry will be marked inactive.
+		 */
+		ioasid_set_put(set);
+	}
+
+	list_add(&curr->list, &ioasid_nb_pending_list);
+
+exit_unlock:
+	spin_unlock(&ioasid_nb_lock);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ioasid_register_notifier_mm);
+
+void ioasid_unregister_notifier_mm(struct mm_struct *mm, struct notifier_block *nb)
+{
+	struct ioasid_set_nb *curr;
+
+	spin_lock(&ioasid_nb_lock);
+	list_for_each_entry(curr, &ioasid_nb_pending_list, list) {
+		if (curr->token == mm && curr->nb == nb) {
+			list_del(&curr->list);
+			spin_unlock(&ioasid_nb_lock);
+			if (curr->active) {
+				atomic_notifier_chain_unregister(&curr->set->nh,
+								 nb);
+			}
+			kfree(curr);
+			return;
+		}
+	}
+	pr_warn("No ioasid set found for mm token %llx\n",  (u64)mm);
+	spin_unlock(&ioasid_nb_lock);
+}
+EXPORT_SYMBOL_GPL(ioasid_unregister_notifier_mm);
 
 MODULE_AUTHOR("Jean-Philippe Brucker <jean-philippe.brucker@arm.com>");
 MODULE_AUTHOR("Jacob Pan <jacob.jun.pan@linux.intel.com>");

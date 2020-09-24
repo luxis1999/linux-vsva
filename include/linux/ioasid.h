@@ -132,6 +132,9 @@ void ioasid_unregister_notifier(struct ioasid_set *set,
 void ioasid_set_for_each_ioasid(struct ioasid_set *sdata,
 				void (*fn)(ioasid_t id, void *data),
 				void *data);
+int ioasid_register_notifier_mm(struct mm_struct *mm, struct notifier_block *nb);
+void ioasid_unregister_notifier_mm(struct mm_struct *mm, struct notifier_block *nb);
+
 #else /* !CONFIG_IOASID */
 static inline void ioasid_install_capacity(ioasid_t total)
 {
@@ -238,5 +241,17 @@ static inline void ioasid_set_for_each_ioasid(struct ioasid_set *sdata,
 					      void *data)
 {
 }
+
+static inline int ioasid_register_notifier_mm(struct mm_struct *mm,
+					      struct notifier_block *nb)
+{
+	return -ENOTSUPP;
+}
+
+static inline void ioasid_unregister_notifier_mm(struct mm_struct *mm,
+						 struct notifier_block *nb)
+{
+}
+
 #endif /* CONFIG_IOASID */
 #endif /* __LINUX_IOASID_H */
