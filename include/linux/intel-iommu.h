@@ -546,6 +546,7 @@ struct dmar_domain {
 
 	bool has_iotlb_device;
 	struct list_head devices;	/* all devices' list */
+	struct list_head sub_devices;	/* all devices' list attached via aux-attach */
 	struct list_head auxd;		/* link to device's auxiliary list */
 	struct iova_domain iovad;	/* iova's that belong to this domain */
 
@@ -647,6 +648,12 @@ struct device_domain_info {
 	struct intel_iommu *iommu; /* IOMMU used by this device */
 	struct dmar_domain *domain; /* pointer to domain */
 	struct pasid_table *pasid_table; /* pasid table */
+};
+
+/* Aux attach device domain info */
+struct device_aux_domain_info {
+	struct device_domain_info *pinfo;
+	struct list_head link;	/* link to domain siblings */
 };
 
 static inline void __iommu_flush_cache(

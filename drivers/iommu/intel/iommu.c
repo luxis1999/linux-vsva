@@ -1851,6 +1851,7 @@ static struct dmar_domain *alloc_domain(int flags)
 	domain->has_iotlb_device = false;
 	domain->pasid_set = host_pasid_set;
 	INIT_LIST_HEAD(&domain->devices);
+	INIT_LIST_HEAD(&domain->sub_devices);
 
 	return domain;
 }
@@ -5154,23 +5155,52 @@ static void auxiliary_link_device(struct dmar_domain *domain,
 				  struct device *dev)
 {
 	struct device_domain_info *info = get_domain_info(dev);
+	struct device_aux_domain_info *ainfo;
 
 	assert_spin_locked(&device_domain_lock);
 	if (WARN_ON(!info))
 		return;
+
+	ainfo = kzalloc(sizeof(*ainfo), GFP_ATOMIC);
+	if (!ainfo)
+		return;
+
+	ainfo->pinfo = info;
+	list_add(&ainfo->link, &domain->sub_devices);
 
 	domain->auxd_refcnt++;
 	list_add(&domain->auxd, &info->auxiliary_domains);
 }
 
+static struct device_aux_domain_info *
+iommu_aux_devinfo_search(struct dmar_domain *domain, struct device_domain_info *info)
+{
+	struct device_aux_domain_info *ainfo;
+
+	assert_spin_locked(&device_domain_lock);
+
+	list_for_each_entry(ainfo, &domain->sub_devices, link)
+		if (ainfo->pinfo == info)
+			return ainfo;
+
+	return NULL;
+}
 static void auxiliary_unlink_device(struct dmar_domain *domain,
 				    struct device *dev)
 {
 	struct device_domain_info *info = get_domain_info(dev);
+	struct device_aux_domain_info *ainfo;
 
 	assert_spin_locked(&device_domain_lock);
 	if (WARN_ON(!info))
 		return;
+
+	ainfo = iommu_aux_devinfo_search(domain, info);
+	if (!ainfo)
+		pr_err("Failed to find aux_dev_domain_info!!!");
+
+	list_del(&ainfo->link);
+	kfree(ainfo);
 
 	list_del(&domain->auxd);
 	domain->auxd_refcnt--;
@@ -6129,8 +6159,21 @@ static int intel_iommu_get_nesting_info(struct iommu_domain *domain,
 	 * related capabilities should be consistent across iommu
 	 * units.
 	 */
-	domain_info = list_first_entry(&dmar_domain->devices,
-				       struct device_domain_info, link);
+	/*
+	 * Check full-device list first, and then sub-device list
+	 */
+	if (!list_empty(&dmar_domain->devices))
+		domain_info = list_first_entry(&dmar_domain->devices,
+					struct device_domain_info, link);
+	else if (!list_empty(&dmar_domain->sub_devices)) {
+		struct device_aux_domain_info *ainfo;
+
+		ainfo = list_first_entry(&dmar_domain->sub_devices,
+					struct device_aux_domain_info, link);
+		domain_info = ainfo->pinfo;
+	} else
+		return -ENODEV;
+
 	cap &= domain_info->iommu->cap;
 	ecap &= domain_info->iommu->ecap;
 
