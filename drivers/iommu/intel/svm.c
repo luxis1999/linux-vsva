@@ -962,6 +962,7 @@ static int prq_to_iommu_prot(struct page_req_dsc *req)
 static int
 intel_svm_prq_report(struct device *dev, struct page_req_dsc *desc)
 {
+	struct device_domain_info *info;
 	struct iommu_fault_event event;
 
 	if (!dev || !dev_is_pci(dev))
@@ -994,6 +995,16 @@ intel_svm_prq_report(struct device *dev, struct page_req_dsc *desc)
 		       sizeof(desc->priv_data));
 	}
 
+	/*
+	 * If the device supports PASID granu scalable mode, reports the
+	 * PASID as vector such that handlers can be dispatched with per
+	 * vector data.
+	 */
+	info = get_domain_info(dev);
+	if (!list_empty(&info->auxiliary_domains)) {
+		dev_dbg(dev, "Aux domain present, assign vector %d\n", desc->pasid);
+		event.vector = desc->pasid;
+	}
 	return iommu_report_device_fault(dev, &event);
 }
 
