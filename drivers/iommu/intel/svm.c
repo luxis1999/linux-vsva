@@ -362,6 +362,7 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 			  struct iommu_gpasid_bind_data *data)
 {
 	struct intel_iommu *iommu = device_to_iommu(dev, NULL, NULL);
+	struct device_domain_info *info;
 	struct intel_svm_dev *sdev = NULL;
 	struct dmar_domain *dmar_domain;
 	struct intel_svm *svm = NULL;
@@ -447,6 +448,8 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 		goto out;
 	}
 	sdev->dev = dev;
+	info = get_domain_info(dev);
+	sdev->sid = PCI_DEVID(info->bus, info->devfn);
 
 	/* Only count users if device has aux domains */
 	if (iommu_dev_feature_enabled(dev, IOMMU_DEV_FEAT_AUX))
@@ -1045,10 +1048,6 @@ static irqreturn_t prq_event_thread(int irq, void *d)
 		}
 
 		result = QI_RESP_INVALID;
-		/* Since we're using init_mm.pgd directly, we should never take
-		 * any faults on kernel addresses. */
-		if (!svm->mm)
-			goto bad_req;
 
 		/* If address is not canonical, return invalid response */
 		if (!is_canonical_address(address))
@@ -1064,6 +1063,11 @@ static irqreturn_t prq_event_thread(int irq, void *d)
 			else
 				goto bad_req;
 		}
+
+		/* Since we're using init_mm.pgd directly, we should never take
+		 * any faults on kernel addresses. */
+		if (!svm->mm)
+			goto bad_req;
 
 		/* If the mm is already defunct, don't handle faults. */
 		if (!mmget_not_zero(svm->mm))
