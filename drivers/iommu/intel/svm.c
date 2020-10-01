@@ -1206,6 +1206,7 @@ int intel_svm_page_response(struct iommu_domain *domain,
 			    struct iommu_page_response *msg)
 {
 	struct iommu_fault_page_request *prm;
+	struct dmar_domain *dmar_domain;
 	struct intel_svm_dev *sdev = NULL;
 	struct intel_svm *svm = NULL;
 	struct intel_iommu *iommu;
@@ -1244,7 +1245,8 @@ int intel_svm_page_response(struct iommu_domain *domain,
 		goto out;
 	}
 
-	ret = pasid_to_svm_sdev(dev, NULL,
+	dmar_domain = to_dmar_domain(domain);
+	ret = pasid_to_svm_sdev(dev, dmar_domain->pasid_set,
 				prm->pasid, &svm, &sdev);
 	if (ret || !sdev) {
 		ret = -ENODEV;
