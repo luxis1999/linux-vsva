@@ -15,6 +15,7 @@ Control Groups version 1
     devices
     freezer-subsystem
     hugetlb
+    ioasids
     memcg_test
     memory
     net_cls
