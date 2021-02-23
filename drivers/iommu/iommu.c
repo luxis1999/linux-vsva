@@ -2169,7 +2169,13 @@ int iommu_uapi_sva_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 	if (ret)
 		return ret;
 
-	return domain->ops->sva_bind_gpasid(domain, dev, &data);
+	ret = ioasid_get_if_owned(data.hpasid);
+	if (ret)
+		return ret;
+	ret = domain->ops->sva_bind_gpasid(domain, dev, &data);
+	ioasid_put(NULL, data.hpasid);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(iommu_uapi_sva_bind_gpasid);
 
@@ -2196,7 +2202,13 @@ int iommu_uapi_sva_unbind_gpasid(struct iommu_domain *domain, struct device *dev
 	if (ret)
 		return ret;
 
-	return iommu_sva_unbind_gpasid(domain, dev, data.hpasid);
+	ret = ioasid_get_if_owned(data.hpasid);
+	if (ret)
+		return ret;
+	ret = iommu_sva_unbind_gpasid(domain, dev, data.hpasid);
+	ioasid_put(NULL, data.hpasid);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(iommu_uapi_sva_unbind_gpasid);
 
