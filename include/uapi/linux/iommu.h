@@ -7,11 +7,20 @@
 #define _UAPI_IOMMU_H
 
 #include <linux/types.h>
+#include <linux/ioctl.h>
 
 #define IOMMU_FAULT_PERM_READ	(1 << 0) /* read */
 #define IOMMU_FAULT_PERM_WRITE	(1 << 1) /* write */
 #define IOMMU_FAULT_PERM_EXEC	(1 << 2) /* exec */
 #define IOMMU_FAULT_PERM_PRIV	(1 << 3) /* privileged */
+
+#define IOMMU_TYPE	('.')
+#define IOMMU_BASE	200
+
+#define IOMMU_USVA_GET_INFO	_IO(IOMMU_TYPE, IOMMU_BASE + 1)
+#define IOMMU_USVA_BIND_PGTBL	_IO(IOMMU_TYPE, IOMMU_BASE + 2)
+#define IOMMU_USVA_UNBIND_PGTBL	_IO(IOMMU_TYPE, IOMMU_BASE + 3)
+#define IOMMU_USVA_FLUSH_CACHE	_IO(IOMMU_TYPE, IOMMU_BASE + 4)
 
 /* Generic fault types, can be expanded IRQ remapping fault */
 enum iommu_fault_type {

@@ -12,6 +12,11 @@ config IOASID_USER
 	depends on IOASID
 	default n
 
+config IOMMU_USVA
+	tristate
+	depends on IOMMU_API
+	default n
+
 # IOMMU_API always gets selected by whoever wants it.
 config IOMMU_API
 	bool

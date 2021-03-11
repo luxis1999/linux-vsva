@@ -646,6 +646,41 @@ struct iommu_sva *iommu_sva_bind_device(struct device *dev,
 void iommu_sva_unbind_device(struct iommu_sva *handle);
 u32 iommu_sva_get_pasid(struct iommu_sva *handle);
 
+#if IS_ENABLED(CONFIG_IOMMU_USVA)
+struct usva_ctx;
+
+extern struct usva_ctx *usva_fdget(int fd);
+extern void usva_put(struct usva_ctx *ctx);
+extern int usva_register_device(struct usva_ctx *ctx,
+				 struct device *dev,
+				 struct iommu_domain *domain);
+extern void usva_unregister_device(struct usva_ctx *ctx);
+
+#else /* CONFIG_IOMMU_USVA */
+struct usva_ctx {};
+
+static inline struct usva_ctx *usva_fdget(int fd)
+{
+	return ERR_PTR(-ENODEV);
+}
+
+static inline void usva_put(struct usva_ctx *ctx)
+{
+}
+
+static inline int usva_register_device(struct usva_ctx *ctx,
+					struct device *dev,
+					struct iommu_domain *domain)
+{
+	return -ENODEV;
+}
+
+static inline void usva_unregister_device(struct usva_ctx *ctx)
+{
+}
+
+#endif /* CONFIG_IOMMU_USVA */
+
 #else /* CONFIG_IOMMU_API */
 
 struct iommu_ops {};
