@@ -44,6 +44,16 @@ menuconfig VFIO_NOIOMMU
 
 	  If you don't know what to do here, say N.
 
+menuconfig VFIO_SVA
+	tristate "VFIO Shared Virtual Addressing"
+	select IOMMU_USVA
+	depends on VFIO
+	help
+	  VFIO support SVA if the device supports SVA.
+	  See Documentation/driver-api/vfio.rst for more details.
+
+	  If you don't know what to do here, say N.
+
 source "drivers/vfio/pci/Kconfig"
 source "drivers/vfio/platform/Kconfig"
 source "drivers/vfio/mdev/Kconfig"

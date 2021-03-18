@@ -24,6 +24,10 @@ struct vfio_device {
 	refcount_t refcount;
 	struct completion comp;
 	struct list_head group_next;
+#ifdef CONFIG_VFIO_SVA
+	struct usva_ctx	*ctx;
+	struct mutex	device_lock;
+#endif
 };
 
 /**

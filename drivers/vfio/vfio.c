@@ -746,6 +746,9 @@ void vfio_init_group_dev(struct vfio_device *device, struct device *dev,
 	init_completion(&device->comp);
 	device->dev = dev;
 	device->ops = ops;
+#ifdef CONFIG_VFIO_SVA
+	mutex_init(&device->device_lock);
+#endif
 }
 EXPORT_SYMBOL_GPL(vfio_init_group_dev);
 
@@ -1541,12 +1544,17 @@ static const struct file_operations vfio_group_fops = {
 	.release	= vfio_group_fops_release,
 };
 
+static int vfio_device_unset_sva(struct vfio_device *device);
+
 /**
  * VFIO Device fd
  */
 static int vfio_device_fops_release(struct inode *inode, struct file *filep)
 {
 	struct vfio_device *device = filep->private_data;
+
+	// If userspace exits without doing UNSET_SVA, here should do equivalent thing
+	vfio_device_unset_sva(device);
 
 	device->ops->release(device);
 
@@ -1557,15 +1565,113 @@ static int vfio_device_fops_release(struct inode *inode, struct file *filep)
 	return 0;
 }
 
+static int vfio_device_set_sva(struct vfio_device *device, unsigned long arg)
+{
+#ifdef CONFIG_VFIO_SVA
+	struct usva_ctx *ctx;
+	struct iommu_domain *domain;
+	int fd, ret, nest = 0;
+
+	mutex_lock(&device->device_lock);
+	if (device->ctx) {
+		ret = -EBUSY;
+		goto out_unlock;
+	}
+
+	if (get_user(fd, (int __user *)arg)) {
+		ret = -EFAULT;
+		goto out_unlock;
+	}
+
+	if (fd < 0) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	ctx = usva_fdget(fd);
+	if (IS_ERR(ctx)) {
+		ret = PTR_ERR(ctx);
+		goto out_unlock;
+	}
+
+	ret = vfio_group_add_container_user(device->group);
+	if (ret)
+		goto out_put;
+
+	domain = vfio_group_iommu_domain(device->group);
+	if (!domain) {
+		ret = -EINVAL;
+		goto out_dissolve;
+	}
+
+	/* Only domains with NESTING attribute could support vSVA */
+	ret = iommu_domain_get_attr(domain, DOMAIN_ATTR_NESTING, &nest);
+	if (ret || !nest) {
+		ret = -ENOTTY;
+		goto out_dissolve;
+	}
+
+	ret = usva_register_device(ctx, device->dev, domain);
+	if (ret)
+		goto out_dissolve;
+
+	device->ctx = ctx;
+	mutex_unlock(&device->device_lock);
+	return 0;
+out_dissolve:
+	vfio_group_try_dissolve_container(device->group);
+out_put:
+	usva_put(ctx);
+out_unlock:
+	mutex_unlock(&device->device_lock);
+	return ret;
+#else /* CONFIG_VFIO_SVA */
+	return -ENOTTY;
+#endif /* CONFIG_VFIO_SVA */
+}
+
+static int vfio_device_unset_sva(struct vfio_device *device)
+{
+#ifdef CONFIG_VFIO_SVA
+	mutex_lock(&device->device_lock);
+	if (!device->ctx) {
+		mutex_unlock(&device->device_lock);
+		return -EINVAL;
+	}
+
+	usva_unregister_device(device->ctx);
+	usva_put(device->ctx);
+	device->ctx = NULL;
+	mutex_unlock(&device->device_lock);
+
+	vfio_group_try_dissolve_container(device->group);
+	return 0;
+#else /* CONFIG_VFIO_SVA */
+	return -ENOTTY;
+#endif /* CONFIG_VFIO_SVA */
+}
+
 static long vfio_device_fops_unl_ioctl(struct file *filep,
 				       unsigned int cmd, unsigned long arg)
 {
 	struct vfio_device *device = filep->private_data;
+	long ret;
 
 	if (unlikely(!device->ops->ioctl))
 		return -EINVAL;
 
-	return device->ops->ioctl(device, cmd, arg);
+	switch (cmd) {
+	case VFIO_DEVICE_SET_SVA:
+		ret = vfio_device_set_sva(device, arg);
+		break;
+	case VFIO_DEVICE_UNSET_SVA:
+		ret = vfio_device_unset_sva(device);
+		break;
+	default:
+		ret = device->ops->ioctl(device, cmd, arg);
+	}
+
+	return ret;
 }
 
 static ssize_t vfio_device_fops_read(struct file *filep, char __user *buf,
