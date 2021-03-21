@@ -137,6 +137,69 @@ static int usva_fops_open(struct inode *inode, struct file *filep)
 	return ret;
 }
 
+static int usva_dev_bind_page_table(struct iommu_domain *domain,
+				     struct device *dev,
+				     struct iommu_gpasid_bind_data *bdata)
+{
+	if (unlikely(!domain->ops->sva_bind_gpasid))
+		return -ENODEV;
+
+	return domain->ops->sva_bind_gpasid(domain, dev, bdata);
+}
+
+static int usva_dev_unbind_page_table(struct iommu_domain *domain,
+				       struct device *dev,
+				       struct iommu_gpasid_bind_data *udata)
+{
+	if (unlikely(!domain->ops->sva_unbind_gpasid))
+		return -ENODEV;
+
+	return domain->ops->sva_unbind_gpasid(domain, dev,
+					      udata->hpasid);
+}
+
+static int usva_bind_pgtbl(struct usva_ctx *ctx,
+			    unsigned long arg, bool is_bind)
+{
+	struct iommu_gpasid_bind_data data = { 0 };
+	int ret;
+
+	ret = iommu_sva_prepare_bind_data((void __user *)arg, &data);
+	if (ret)
+		return ret;
+
+	ret = ioasid_get_if_owned(data.hpasid);
+	if (ret)
+		return ret;
+
+	if (is_bind)
+		ret = usva_dev_bind_page_table(ctx->domain,
+					       ctx->dev, &data);
+	else if (!is_bind || ret)
+		ret = usva_dev_unbind_page_table(ctx->domain,
+						 ctx->dev, &data);
+
+	ioasid_put(NULL, data.hpasid);
+
+	return ret;
+}
+
+static int usva_flush_cache(struct usva_ctx *ctx, unsigned long arg)
+{
+	struct iommu_cache_invalidate_info inv_info = { 0 };
+	struct iommu_domain *domain = ctx->domain;
+	int ret;
+
+	if (unlikely(!domain->ops->cache_invalidate))
+		return -ENODEV;
+
+	ret = iommu_prepare_cache_inv_info((void __user *)arg, &inv_info);
+	if (ret)
+		return ret;
+
+	return domain->ops->cache_invalidate(domain, ctx->dev, &inv_info);
+}
+
 static int usva_get_info(struct iommu_domain *domain, unsigned long arg)
 {
 	struct iommu_sva_info info;
@@ -171,9 +234,13 @@ static long usva_fops_unl_ioctl(struct file *filep,
 		ret = usva_get_info(ctx->domain, arg);
 		break;
 	case IOMMU_USVA_BIND_PGTBL:
+		ret = usva_bind_pgtbl(ctx, arg, true);
+		break;
 	case IOMMU_USVA_UNBIND_PGTBL:
+		ret = usva_bind_pgtbl(ctx, arg, false);
+		break;
 	case IOMMU_USVA_FLUSH_CACHE:
-		ret = -ENOTTY;
+		ret = usva_flush_cache(ctx, arg);
 		break;
 	default:
 		pr_err("Unsupported cmd %u\n", cmd);
