@@ -2046,15 +2046,10 @@ static int iommu_check_cache_invl_data(struct iommu_cache_invalidate_info *info)
 	return 0;
 }
 
-int iommu_uapi_cache_invalidate(struct iommu_domain *domain, struct device *dev,
-				void __user *uinfo)
+int iommu_prepare_cache_inv_info(void __user *uinfo,
+				 struct iommu_cache_invalidate_info *inv_info)
 {
-	struct iommu_cache_invalidate_info inv_info = { 0 };
 	u32 minsz;
-	int ret;
-
-	if (unlikely(!domain->ops->cache_invalidate))
-		return -ENODEV;
 
 	/*
 	 * No new spaces can be added before the variable sized union, the
@@ -2063,20 +2058,20 @@ int iommu_uapi_cache_invalidate(struct iommu_domain *domain, struct device *dev,
 	minsz = offsetof(struct iommu_cache_invalidate_info, granu);
 
 	/* Copy minsz from user to get flags and argsz */
-	if (copy_from_user(&inv_info, uinfo, minsz))
+	if (copy_from_user(inv_info, uinfo, minsz))
 		return -EFAULT;
 
 	/* Fields before the variable size union are mandatory */
-	if (inv_info.argsz < minsz)
+	if (inv_info->argsz < minsz)
 		return -EINVAL;
 
 	/* PASID and address granu require additional info beyond minsz */
-	if (inv_info.granularity == IOMMU_INV_GRANU_PASID &&
-	    inv_info.argsz < offsetofend(struct iommu_cache_invalidate_info, granu.pasid_info))
+	if (inv_info->granularity == IOMMU_INV_GRANU_PASID &&
+	    inv_info->argsz < offsetofend(struct iommu_cache_invalidate_info, granu.pasid_info))
 		return -EINVAL;
 
-	if (inv_info.granularity == IOMMU_INV_GRANU_ADDR &&
-	    inv_info.argsz < offsetofend(struct iommu_cache_invalidate_info, granu.addr_info))
+	if (inv_info->granularity == IOMMU_INV_GRANU_ADDR &&
+	    inv_info->argsz < offsetofend(struct iommu_cache_invalidate_info, granu.addr_info))
 		return -EINVAL;
 
 	/*
@@ -2085,14 +2080,22 @@ int iommu_uapi_cache_invalidate(struct iommu_domain *domain, struct device *dev,
 	 * size. Copy the remaining user data _after_ minsz but not more
 	 * than the current kernel supported size.
 	 */
-	if (copy_from_user((void *)&inv_info + minsz, uinfo + minsz,
-			   min_t(u32, inv_info.argsz, sizeof(inv_info)) - minsz))
+	if (copy_from_user((void *)inv_info + minsz, uinfo + minsz,
+			   min_t(u32, inv_info->argsz, sizeof(*inv_info)) - minsz))
 		return -EFAULT;
 
 	/* Now the argsz is validated, check the content */
-	ret = iommu_check_cache_invl_data(&inv_info);
-	if (ret)
-		return ret;
+	return iommu_check_cache_invl_data(inv_info);
+}
+EXPORT_SYMBOL_GPL(iommu_prepare_cache_inv_info);
+
+int iommu_uapi_cache_invalidate(struct iommu_domain *domain, struct device *dev,
+				void __user *uinfo)
+{
+	struct iommu_cache_invalidate_info inv_info = { 0 };
+
+	if (unlikely(!domain->ops->cache_invalidate))
+		return -ENODEV;
 
 	return domain->ops->cache_invalidate(domain, dev, &inv_info);
 }
@@ -2124,8 +2127,8 @@ static int iommu_check_bind_data(struct iommu_gpasid_bind_data *data)
 	return 0;
 }
 
-static int iommu_sva_prepare_bind_data(void __user *udata,
-				       struct iommu_gpasid_bind_data *data)
+int iommu_sva_prepare_bind_data(void __user *udata,
+				struct iommu_gpasid_bind_data *data)
 {
 	u32 minsz;
 
@@ -2155,6 +2158,7 @@ static int iommu_sva_prepare_bind_data(void __user *udata,
 
 	return iommu_check_bind_data(data);
 }
+EXPORT_SYMBOL_GPL(iommu_sva_prepare_bind_data);
 
 int iommu_uapi_sva_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 			       void __user *udata)

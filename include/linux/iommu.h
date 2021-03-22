@@ -430,10 +430,14 @@ extern int iommu_attach_device(struct iommu_domain *domain,
 			       struct device *dev);
 extern void iommu_detach_device(struct iommu_domain *domain,
 				struct device *dev);
+extern int iommu_prepare_cache_inv_info(void __user *uinfo,
+				 struct iommu_cache_invalidate_info *inv_info);
 extern int iommu_uapi_cache_invalidate(struct iommu_domain *domain,
 				       struct device *dev,
 				       void __user *uinfo);
 
+extern int iommu_sva_prepare_bind_data(void __user *udata,
+				struct iommu_gpasid_bind_data *data);
 extern int iommu_uapi_sva_bind_gpasid(struct iommu_domain *domain,
 				      struct device *dev, void __user *udata);
 extern int iommu_uapi_sva_unbind_gpasid(struct iommu_domain *domain,
@@ -1067,9 +1071,23 @@ static inline u32 iommu_sva_get_pasid(struct iommu_sva *handle)
 }
 
 static inline int
+iommu_prepare_cache_inv_info(void __user *uinfo,
+			     struct iommu_cache_invalidate_info *inv_info)
+{
+	return -ENODEV;
+}
+
+static inline int
 iommu_uapi_cache_invalidate(struct iommu_domain *domain,
 			    struct device *dev,
 			    struct iommu_cache_invalidate_info *inv_info)
+{
+	return -ENODEV;
+}
+
+static inline int
+iommu_sva_prepare_bind_data(void __user *udata,
+			    struct iommu_gpasid_bind_data *data)
 {
 	return -ENODEV;
 }
