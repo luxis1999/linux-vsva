@@ -5512,8 +5512,17 @@ static int
 intel_iommu_domain_get_attr(struct iommu_domain *domain,
 			    enum iommu_attr attr, void *data)
 {
+	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
+
 	switch (domain->type) {
 	case IOMMU_DOMAIN_UNMANAGED:
+		switch (attr) {
+		case DOMAIN_ATTR_NESTING:
+			*(int *)data = (dmar_domain->flags & DOMAIN_FLAG_NESTING_MODE);
+			return 0;
+		default:
+			return -ENODEV;
+		}
 		return -ENODEV;
 	case IOMMU_DOMAIN_DMA:
 		switch (attr) {
